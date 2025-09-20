@@ -421,7 +421,7 @@
 <body>
     <div class="container">
         <h1>Decision Tree Builder</h1>
-        <div class="subtitle">Tanh-Style Scoring: -5 (Very Poor) to +5 (Industry Leader)</div>
+        <div class="subtitle" id="scale-subtitle">Bipolar Scale: -5 (Very Poor) to +5 (Industry Leader)</div>
         
         <div id="tree-container">
             <svg id="tree-svg"></svg>
@@ -451,9 +451,17 @@
                     <option value="heatmap">Path Heatmap</option>
                     <option value="tanh">Tanh Curve</option>
                     <option value="radial">Radial Layout</option>
+                    <option value="clustering">Clustering Analysis</option>
                 </select>
             </div>
+            <div class="control-group">
+                <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="allow-decimals" onchange="updateDecimalPrecision()">
+                    Allow Decimal Values
+                </label>
+            </div>
             <button onclick="toggleBuilder()">Toggle Builder</button>
+            <button onclick="toggleSettings()">Settings</button>
             <button onclick="resetPath()">Reset Path</button>
             <button onclick="runSurvey()">Run Survey</button>
             <button onclick="uploadSurveyData()">Upload Survey Data</button>
@@ -477,19 +485,19 @@
             <p id="scale-description" style="color: #666; margin-bottom: 20px;">Please rate on the selected scale</p>
             
             <div style="margin: 30px 0;">
-                <input type="range" id="score-slider" min="-5" max="5" step="0.1" value="0" style="width: 100%;">
+                <input type="range" id="score-slider" min="-5" max="5" step="1" value="0" style="width: 100%;">
                 <div id="scale-labels" style="display: flex; justify-content: space-between; margin-top: 10px;">
                     <!-- Will be dynamically filled based on scale -->
                 </div>
             </div>
             
             <div style="text-align: center; margin: 20px 0;">
-                <span style="font-size: 48px; font-weight: bold; color: #333;" id="score-display">0.0</span>
+                <span style="font-size: 48px; font-weight: bold; color: #333;" id="score-display">0</span>
             </div>
             
             <div style="margin-top: 20px;">
                 <label>Or enter exact value:</label>
-                <input type="number" id="score-input" min="-5" max="5" step="0.1" value="0" style="width: 100%; padding: 10px; font-size: 16px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px; transition: all 0.3s ease;">
+                <input type="number" id="score-input" min="-5" max="5" step="1" value="0" style="width: 100%; padding: 10px; font-size: 16px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px; transition: all 0.3s ease;">
             </div>
             
             <div style="display: flex; gap: 10px; margin-top: 30px;">
@@ -527,6 +535,96 @@
                 <button onclick="importTree()">Import Tree</button>
             </div>
             <input type="file" id="import-file" style="display: none;" accept=".json">
+        </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="builder-panel" id="settings-panel" style="display: none;">
+        <h2 style="background: linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Settings & Advanced Features</h2>
+        
+        <div class="builder-section">
+            <h3>Export Options</h3>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button onclick="exportVisualizationAsPNG()" style="padding: 10px; background: linear-gradient(135deg, #0039A6, #4B9BFF); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Export Visualization as PNG
+                </button>
+                <button onclick="exportVisualizationAsPDF()" style="padding: 10px; background: linear-gradient(135deg, #0039A6, #4B9BFF); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Export Visualization as PDF
+                </button>
+                <button onclick="exportFullReport()" style="padding: 10px; background: linear-gradient(135deg, #CC0033, #FF6B6B); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Generate Full Report (PDF)
+                </button>
+            </div>
+        </div>
+
+        <div class="builder-section">
+            <h3>Analysis Tools</h3>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button onclick="compareDatasets()" style="padding: 10px; background: linear-gradient(135deg, #45B7D1, #0039A6); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Compare Multiple Datasets
+                </button>
+                <button onclick="showNodeSearch()" style="padding: 10px; background: linear-gradient(135deg, #45B7D1, #0039A6); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Search & Filter Nodes
+                </button>
+                <button onclick="showAdvancedMetrics()" style="padding: 10px; background: linear-gradient(135deg, #45B7D1, #0039A6); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Advanced Metrics Dashboard
+                </button>
+            </div>
+        </div>
+
+        <div class="builder-section">
+            <h3>History & Undo</h3>
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <button onclick="undoAction()" id="undo-btn" style="flex: 1; padding: 10px; background: #71717A; color: white; border: none; border-radius: 8px; cursor: pointer;" disabled>
+                    ← Undo
+                </button>
+                <button onclick="redoAction()" id="redo-btn" style="flex: 1; padding: 10px; background: #71717A; color: white; border: none; border-radius: 8px; cursor: pointer;" disabled>
+                    Redo →
+                </button>
+            </div>
+            <div id="history-list" style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; padding: 10px;">
+                <p style="color: #999; text-align: center;">No actions yet</p>
+            </div>
+        </div>
+
+        <div class="builder-section">
+            <h3>Collaboration</h3>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button onclick="shareTree()" style="padding: 10px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Share Tree (Generate Link)
+                </button>
+                <button onclick="exportForCollaboration()" style="padding: 10px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    Export for Team Collaboration
+                </button>
+                <div style="margin-top: 10px;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="auto-save" onchange="toggleAutoSave()">
+                        Enable Auto-Save (every 30 seconds)
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div class="builder-section">
+            <h3>Display Preferences</h3>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <label>
+                    Node Size:
+                    <input type="range" id="node-size-slider" min="50" max="200" value="120" onchange="updateNodeSize(this.value)" style="width: 100%;">
+                </label>
+                <label>
+                    Animation Speed:
+                    <input type="range" id="animation-speed" min="0" max="2000" value="500" onchange="updateAnimationSpeed(this.value)" style="width: 100%;">
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="show-tooltips" checked onchange="toggleTooltips()">
+                    Show Tooltips
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="show-grid" onchange="toggleGrid()">
+                    Show Grid
+                </label>
+            </div>
         </div>
     </div>
 
@@ -772,11 +870,11 @@
                         nodeDiv.innerHTML = `
                             <input type="text" placeholder="Question" value="${node.question}"
                                 onchange="treeBuilder.updateNodeProperties('${node.id}', {question: this.value})">
-                            <label>Default Score (-5 to 5) for testing:</label>
-                            <input type="number" min="-5" max="5" step="0.1" value="${node.score || 0}"
+                            <label>Default Score (${currentScaleMin} to ${currentScaleMax}) for testing:</label>
+                            <input type="number" min="${currentScaleMin}" max="${currentScaleMax}" step="${allowDecimals ? '0.1' : '1'}" value="${node.score || ((currentScaleMin + currentScaleMax) / 2)}"
                                 onchange="treeBuilder.updateNodeProperties('${node.id}', {score: parseFloat(this.value)})">
                             <label>Threshold (triggers right branch if score ≥ threshold):</label>
-                            <input type="number" min="-5" max="5" step="0.1" value="${node.threshold}"
+                            <input type="number" min="${currentScaleMin}" max="${currentScaleMax}" step="${allowDecimals ? '0.1' : '1'}" value="${node.threshold}"
                                 onchange="treeBuilder.updateNodeProperties('${node.id}', {threshold: parseFloat(this.value)})">
                             ${index > 0 ? `
                                 <label>Connect as LEFT branch (score < threshold) of:</label>
@@ -1002,6 +1100,7 @@
 
         // Current active scale
         let currentColorScale = 'bipolar_5';
+        let allowDecimals = false; // Default to integers only
 
         // Auto-detect data range from survey data
         function detectDataRange(data) {
@@ -1143,6 +1242,17 @@
         let currentScaleMax = 5;
         let currentScaleRange = '-5,5';
         
+        // Scale descriptions for subtitle
+        const scaleDescriptions = {
+            '-5,5': 'Bipolar Scale: -5 (Very Poor) to +5 (Industry Leader)',
+            '-3,3': 'Bipolar Scale: -3 (Strongly Negative) to +3 (Strongly Positive)',
+            '-2,2': 'Bipolar Scale: -2 (Disagree) to +2 (Agree)',
+            '0,10': 'Rating Scale: 0 (Worst) to 10 (Best)',
+            '0,7': 'Likert Scale: 0 (Not at All) to 7 (Extremely)',
+            '1,7': 'Likert Scale: 1 (Strongly Disagree) to 7 (Strongly Agree)',
+            '1,5': 'Likert Scale: 1 (Strongly Disagree) to 5 (Strongly Agree)'
+        };
+        
         // Update scale type based on dropdown
         function updateScaleType() {
             const scaleSelect = document.getElementById('scale-type');
@@ -1165,6 +1275,17 @@
             currentColorScale = scaleMap[currentScaleRange] || 'bipolar_5';
             updateColorLegend();
             
+            // Update subtitle
+            const subtitle = document.getElementById('scale-subtitle');
+            if (subtitle && scaleDescriptions[currentScaleRange]) {
+                subtitle.textContent = scaleDescriptions[currentScaleRange];
+            }
+            
+            // Update builder display if it exists
+            if (treeBuilder && typeof treeBuilder.updateLayersDisplay === 'function') {
+                treeBuilder.updateLayersDisplay();
+            }
+            
             // Update any existing visualizations
             if (treeBuilder.nodes.size > 0) {
                 visualizeTree();
@@ -1173,16 +1294,68 @@
             console.log(`Scale updated: ${min} to ${max}, using color scale: ${currentColorScale}`);
         }
 
+        // Update decimal precision based on checkbox
+        function updateDecimalPrecision() {
+            const checkbox = document.getElementById('allow-decimals');
+            allowDecimals = checkbox.checked;
+            
+            // Update builder display if it exists
+            if (treeBuilder && typeof treeBuilder.updateLayersDisplay === 'function') {
+                treeBuilder.updateLayersDisplay();
+            }
+            
+            console.log(`Decimal values: ${allowDecimals ? 'enabled' : 'disabled'}`);
+        }
+
         function changeVisualization() {
             const vizMode = document.getElementById('viz-mode').value;
             
-            if (vizMode === 'distribution' && window.batchResults) {
-                drawScoreDistribution();
-            } else if (vizMode === 'heatmap' && window.batchResults) {
-                visualizePathTraversals(getEdgeTraversals(), window.batchResults.length);
+            if (vizMode === 'distribution') {
+                if (window.batchResults && window.batchResults.length > 0) {
+                    drawScoreDistribution();
+                } else {
+                    showNoDataMessage('Upload survey data to see score distributions');
+                }
+            } else if (vizMode === 'heatmap') {
+                if (window.batchResults && window.batchResults.length > 0) {
+                    visualizePathTraversals(getEdgeTraversals(), window.batchResults.length);
+                } else {
+                    showNoDataMessage('Upload survey data to see path heatmap');
+                }
+            } else if (vizMode === 'clustering') {
+                if (window.batchResults && window.batchResults.length > 0) {
+                    drawClusteringVisualization();
+                } else {
+                    showNoDataMessage('Upload survey data to see clustering analysis');
+                }
             } else {
                 visualizeTree();
             }
+        }
+        
+        function showNoDataMessage(message) {
+            const container = document.getElementById('tree-container');
+            const svg = document.getElementById('tree-svg');
+            svg.innerHTML = '';
+            
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', container.clientWidth / 2);
+            text.setAttribute('y', container.clientHeight / 2);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('font-size', '20');
+            text.setAttribute('fill', '#666');
+            text.textContent = message;
+            svg.appendChild(text);
+            
+            // Add upload hint
+            const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            hint.setAttribute('x', container.clientWidth / 2);
+            hint.setAttribute('y', container.clientHeight / 2 + 30);
+            hint.setAttribute('text-anchor', 'middle');
+            hint.setAttribute('font-size', '14');
+            hint.setAttribute('fill', '#999');
+            hint.textContent = 'Click "Upload Survey Data" to load responses';
+            svg.appendChild(hint);
         }
 
         function getEdgeTraversals() {
@@ -1199,6 +1372,257 @@
                 });
             }
             return edgeTraversals;
+        }
+
+        function drawClusteringVisualization() {
+            if (!surveyData || surveyData.length === 0) {
+                showNoDataMessage('Upload survey data to see clustering analysis');
+                return;
+            }
+
+            const container = document.getElementById('tree-container');
+            const svg = document.getElementById('tree-svg');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            svg.innerHTML = '';
+
+            // Extract response patterns
+            const responsePatterns = [];
+            const responseLabels = [];
+            
+            surveyData.forEach(response => {
+                const pattern = [];
+                const label = response.respondentId || `R${responsePatterns.length + 1}`;
+                
+                // Collect all numeric values
+                for (const key in response) {
+                    if (key !== 'respondentId' && !isNaN(parseFloat(response[key]))) {
+                        pattern.push(parseFloat(response[key]));
+                    }
+                }
+                
+                if (pattern.length > 0) {
+                    responsePatterns.push(pattern);
+                    responseLabels.push(label);
+                }
+            });
+
+            if (responsePatterns.length === 0) {
+                showNoDataMessage('No valid numeric data found for clustering');
+                return;
+            }
+
+            // Simple k-means clustering (k=3-5 based on data size)
+            const k = Math.min(5, Math.max(3, Math.floor(responsePatterns.length / 5)));
+            const clusters = performKMeansClustering(responsePatterns, k);
+            
+            // Color palette
+            const clusterColors = ['#0039A6', '#CC0033', '#4B9BFF', '#FF6B6B', '#45B7D1'];
+            
+            // Calculate cluster centers for visualization
+            const clusterGroups = {};
+            clusters.forEach((clusterId, idx) => {
+                if (!clusterGroups[clusterId]) {
+                    clusterGroups[clusterId] = [];
+                }
+                clusterGroups[clusterId].push({
+                    pattern: responsePatterns[idx],
+                    label: responseLabels[idx],
+                    index: idx
+                });
+            });
+
+            // Position clusters in circular layout
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(width, height) * 0.35;
+            
+            let clusterIndex = 0;
+            for (const clusterId in clusterGroups) {
+                const angle = (clusterIndex / k) * Math.PI * 2 - Math.PI / 2; // Start from top
+                const clusterX = centerX + Math.cos(angle) * radius;
+                const clusterY = centerY + Math.sin(angle) * radius;
+                
+                // Draw cluster circle
+                const clusterCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                clusterCircle.setAttribute('cx', clusterX);
+                clusterCircle.setAttribute('cy', clusterY);
+                clusterCircle.setAttribute('r', Math.sqrt(clusterGroups[clusterId].length) * 15);
+                clusterCircle.setAttribute('fill', clusterColors[clusterIndex % clusterColors.length]);
+                clusterCircle.setAttribute('fill-opacity', '0.2');
+                clusterCircle.setAttribute('stroke', clusterColors[clusterIndex % clusterColors.length]);
+                clusterCircle.setAttribute('stroke-width', '2');
+                svg.appendChild(clusterCircle);
+                
+                // Draw cluster label
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', clusterX);
+                label.setAttribute('y', clusterY - Math.sqrt(clusterGroups[clusterId].length) * 15 - 10);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('font-size', '14');
+                label.setAttribute('font-weight', 'bold');
+                label.setAttribute('fill', clusterColors[clusterIndex % clusterColors.length]);
+                label.textContent = `Cluster ${parseInt(clusterId) + 1}`;
+                svg.appendChild(label);
+                
+                // Draw individual points
+                clusterGroups[clusterId].forEach((item, i) => {
+                    const pointAngle = (i / clusterGroups[clusterId].length) * Math.PI * 2;
+                    const pointRadius = Math.sqrt(clusterGroups[clusterId].length) * 10;
+                    const pointX = clusterX + Math.cos(pointAngle) * pointRadius;
+                    const pointY = clusterY + Math.sin(pointAngle) * pointRadius;
+                    
+                    const point = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    point.setAttribute('cx', pointX);
+                    point.setAttribute('cy', pointY);
+                    point.setAttribute('r', '4');
+                    point.setAttribute('fill', clusterColors[clusterIndex % clusterColors.length]);
+                    point.setAttribute('fill-opacity', '0.8');
+                    point.setAttribute('stroke', '#fff');
+                    point.setAttribute('stroke-width', '1');
+                    
+                    // Add tooltip
+                    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                    const avgScore = item.pattern.reduce((a, b) => a + b, 0) / item.pattern.length;
+                    title.textContent = `${item.label}\nAvg: ${avgScore.toFixed(2)}`;
+                    point.appendChild(title);
+                    
+                    svg.appendChild(point);
+                });
+                
+                // Add cluster size
+                const sizeText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                sizeText.setAttribute('x', clusterX);
+                sizeText.setAttribute('y', clusterY + 5);
+                sizeText.setAttribute('text-anchor', 'middle');
+                sizeText.setAttribute('font-size', '12');
+                sizeText.setAttribute('fill', '#666');
+                sizeText.textContent = `n=${clusterGroups[clusterId].length}`;
+                svg.appendChild(sizeText);
+                
+                clusterIndex++;
+            }
+
+            // Add legend
+            const legendX = width - 150;
+            const legendY = 30;
+            
+            const legendTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            legendTitle.setAttribute('x', legendX);
+            legendTitle.setAttribute('y', legendY);
+            legendTitle.setAttribute('font-size', '14');
+            legendTitle.setAttribute('font-weight', 'bold');
+            legendTitle.textContent = 'Response Clusters';
+            svg.appendChild(legendTitle);
+
+            clusterIndex = 0;
+            for (const clusterId in clusterGroups) {
+                const y = legendY + 25 + clusterIndex * 25;
+                
+                const legendCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                legendCircle.setAttribute('cx', legendX + 10);
+                legendCircle.setAttribute('cy', y);
+                legendCircle.setAttribute('r', '8');
+                legendCircle.setAttribute('fill', clusterColors[clusterIndex % clusterColors.length]);
+                legendCircle.setAttribute('fill-opacity', '0.7');
+                svg.appendChild(legendCircle);
+                
+                const legendText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                legendText.setAttribute('x', legendX + 25);
+                legendText.setAttribute('y', y + 5);
+                legendText.setAttribute('font-size', '12');
+                legendText.textContent = `Group ${parseInt(clusterId) + 1} (${clusterGroups[clusterId].length})`;
+                svg.appendChild(legendText);
+                
+                clusterIndex++;
+            }
+
+            // Add description
+            const desc = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            desc.setAttribute('x', width / 2);
+            desc.setAttribute('y', height - 20);
+            desc.setAttribute('text-anchor', 'middle');
+            desc.setAttribute('font-size', '12');
+            desc.setAttribute('fill', '#666');
+            desc.textContent = 'Responses grouped by similarity of answer patterns';
+            svg.appendChild(desc);
+        }
+
+        function performKMeansClustering(data, k) {
+            const n = data.length;
+            const assignments = new Array(n).fill(0);
+            
+            if (n <= k) {
+                // If fewer data points than clusters, each gets its own cluster
+                return data.map((_, i) => i);
+            }
+            
+            // Initialize cluster centers randomly
+            const centers = [];
+            const usedIndices = new Set();
+            while (centers.length < k) {
+                const idx = Math.floor(Math.random() * n);
+                if (!usedIndices.has(idx)) {
+                    centers.push([...data[idx]]);
+                    usedIndices.add(idx);
+                }
+            }
+            
+            // K-means iterations
+            for (let iter = 0; iter < 20; iter++) {
+                let changed = false;
+                
+                // Assign points to nearest center
+                for (let i = 0; i < n; i++) {
+                    let minDist = Infinity;
+                    let bestCluster = 0;
+                    
+                    for (let j = 0; j < k; j++) {
+                        const dist = euclideanDistance(data[i], centers[j]);
+                        if (dist < minDist) {
+                            minDist = dist;
+                            bestCluster = j;
+                        }
+                    }
+                    
+                    if (assignments[i] !== bestCluster) {
+                        assignments[i] = bestCluster;
+                        changed = true;
+                    }
+                }
+                
+                if (!changed) break;
+                
+                // Update centers
+                for (let c = 0; c < k; c++) {
+                    const clusterPoints = [];
+                    for (let i = 0; i < n; i++) {
+                        if (assignments[i] === c) {
+                            clusterPoints.push(data[i]);
+                        }
+                    }
+                    
+                    if (clusterPoints.length > 0) {
+                        // Calculate mean of cluster points
+                        const dims = centers[c].length;
+                        for (let d = 0; d < dims; d++) {
+                            centers[c][d] = clusterPoints.reduce((sum, p) => sum + (p[d] || 0), 0) / clusterPoints.length;
+                        }
+                    }
+                }
+            }
+            
+            return assignments;
+        }
+
+        function euclideanDistance(a, b) {
+            let sum = 0;
+            const len = Math.min(a.length, b.length);
+            for (let i = 0; i < len; i++) {
+                const diff = (a[i] || 0) - (b[i] || 0);
+                sum += diff * diff;
+            }
+            return Math.sqrt(sum);
         }
 
         function visualizeTree() {
@@ -1279,14 +1703,28 @@
             const height = container.clientHeight;
             const layerHeight = height / (treeBuilder.layers.length + 1);
             
+            // Create S-curve effect where nodes flow based on their scores
             treeBuilder.layers.forEach((layer, layerIndex) => {
                 layer.nodes.forEach((node, nodeIndex) => {
-                    // Use tanh to create curved spacing based on node score
-                    const tanhFactor = Math.tanh(node.score / 3);
+                    // Normalize score to current scale range
+                    const normalizedScore = (node.score - currentScaleMin) / (currentScaleMax - currentScaleMin) * 2 - 1;
+                    
+                    // Apply tanh for smooth S-curve
+                    const tanhFactor = Math.tanh(normalizedScore * 2); // multiply by 2 for more dramatic curve
+                    
+                    // Create vertical S-curve effect
                     const baseX = width / 2;
-                    const spread = width / 3;
-                    node.x = baseX + tanhFactor * spread;
+                    const maxSpread = width * 0.4; // Use 40% of width for spreading
+                    
+                    // Add layer-based oscillation for S-shape
+                    const oscillation = Math.sin(layerIndex * Math.PI / 3) * 0.3;
+                    const spreadAdjust = maxSpread * (1 + oscillation);
+                    
+                    node.x = baseX + tanhFactor * spreadAdjust;
                     node.y = layerHeight * (layerIndex + 1);
+                    
+                    // Store the tanh factor for coloring
+                    node.tanhFactor = tanhFactor;
                 });
             });
         }
@@ -1297,18 +1735,54 @@
             const height = container.clientHeight;
             const centerX = width / 2;
             const centerY = height / 2;
-            const maxRadius = Math.min(width, height) / 2 - 100;
+            const maxRadius = Math.min(width, height) / 2 - 80;
             
-            treeBuilder.layers.forEach((layer, layerIndex) => {
-                const radius = (maxRadius / treeBuilder.layers.length) * (layerIndex + 1);
-                const angleStep = (2 * Math.PI) / layer.nodes.length;
+            // Place root at center if it exists
+            if (treeBuilder.layers.length > 0 && treeBuilder.layers[0].nodes.length > 0) {
+                const rootNode = treeBuilder.layers[0].nodes[0];
+                rootNode.x = centerX;
+                rootNode.y = centerY;
+                rootNode.angle = 0; // Store angle for curved links
+            }
+            
+            // Place other layers in concentric circles
+            for (let layerIndex = 1; layerIndex < treeBuilder.layers.length; layerIndex++) {
+                const layer = treeBuilder.layers[layerIndex];
+                const radius = (maxRadius / (treeBuilder.layers.length - 1)) * layerIndex;
+                
+                // Calculate total angle needed based on parent nodes
+                const parentLayer = treeBuilder.layers[layerIndex - 1];
+                let angleRanges = [];
+                
+                parentLayer.nodes.forEach(parentNode => {
+                    const childCount = layer.nodes.filter(n => 
+                        n.parentId === parentNode.id || 
+                        parentNode.leftId === n.id || 
+                        parentNode.rightId === n.id
+                    ).length;
+                    
+                    if (childCount > 0) {
+                        angleRanges.push({
+                            parent: parentNode,
+                            count: childCount,
+                            startAngle: parentNode.angle || 0
+                        });
+                    }
+                });
+                
+                // Distribute nodes around the circle
+                let currentAngle = -Math.PI / 2; // Start at top
+                const totalNodes = layer.nodes.length;
+                const angleStep = (2 * Math.PI) / Math.max(totalNodes, 3); // Minimum 3 for spacing
                 
                 layer.nodes.forEach((node, nodeIndex) => {
-                    const angle = angleStep * nodeIndex - Math.PI / 2;
+                    const angle = currentAngle + angleStep * nodeIndex;
                     node.x = centerX + radius * Math.cos(angle);
                     node.y = centerY + radius * Math.sin(angle);
+                    node.angle = angle; // Store for child positioning
+                    node.radius = radius; // Store for drawing curved links
                 });
-            });
+            }
         }
 
         function drawScoreDistribution() {
@@ -1349,15 +1823,23 @@
                 });
             });
             
-            // Create histograms
+            // Create histograms adapted to current scale
             Object.values(nodeDistributions).forEach(dist => {
-                for (let score = -5; score <= 5; score += 0.5) {
-                    dist.histogram[score] = 0;
+                // Create bins based on current scale
+                const binCount = 20; // Use 20 bins for any scale
+                const binSize = (currentScaleMax - currentScaleMin) / binCount;
+                
+                for (let i = 0; i <= binCount; i++) {
+                    const binValue = currentScaleMin + i * binSize;
+                    dist.histogram[binValue.toFixed(1)] = 0;
                 }
+                
                 dist.scores.forEach(score => {
-                    const rounded = Math.round(score * 2) / 2; // Round to nearest 0.5
-                    if (rounded >= -5 && rounded <= 5) {
-                        dist.histogram[rounded]++;
+                    // Find the closest bin
+                    const binIndex = Math.round((score - currentScaleMin) / binSize);
+                    const binValue = (currentScaleMin + binIndex * binSize).toFixed(1);
+                    if (dist.histogram[binValue] !== undefined) {
+                        dist.histogram[binValue]++;
                     }
                 });
             });
@@ -1731,16 +2213,18 @@
             
             slider.min = currentScaleMin;
             slider.max = currentScaleMax;
-            slider.step = '0.1';
+            slider.step = allowDecimals ? '0.1' : '1';
             
             input.min = currentScaleMin;
             input.max = currentScaleMax;
+            input.step = allowDecimals ? '0.1' : '1';
             
             // Calculate midpoint for initial value
             const midpoint = (currentScaleMin + currentScaleMax) / 2;
-            slider.value = midpoint;
-            input.value = midpoint.toFixed(1);
-            display.textContent = midpoint.toFixed(1);
+            const initialValue = allowDecimals ? midpoint : Math.round(midpoint);
+            slider.value = initialValue;
+            input.value = allowDecimals ? initialValue.toFixed(1) : initialValue;
+            display.textContent = allowDecimals ? initialValue.toFixed(1) : initialValue;
             
             // Update scale labels based on current scale
             const labelsDiv = document.getElementById('scale-labels');
@@ -1783,8 +2267,8 @@
             // Sync slider and input
             slider.oninput = function() {
                 const value = parseFloat(this.value);
-                input.value = value.toFixed(1);
-                display.textContent = value.toFixed(1);
+                input.value = allowDecimals ? value.toFixed(1) : Math.round(value);
+                display.textContent = allowDecimals ? value.toFixed(1) : Math.round(value);
                 updateScoreDisplay(display, value);
             };
             
@@ -1792,7 +2276,7 @@
                 const value = parseFloat(this.value);
                 if (!isNaN(value) && value >= currentScaleMin && value <= currentScaleMax) {
                     slider.value = value;
-                    display.textContent = value.toFixed(1);
+                    display.textContent = allowDecimals ? value.toFixed(1) : Math.round(value);
                     updateScoreDisplay(display, value);
                 }
             };
@@ -1923,6 +2407,15 @@
         function toggleBuilder() {
             const panel = document.getElementById('builder-panel');
             panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            // Hide settings panel if open
+            document.getElementById('settings-panel').style.display = 'none';
+        }
+
+        function toggleSettings() {
+            const panel = document.getElementById('settings-panel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            // Hide builder panel if open
+            document.getElementById('builder-panel').style.display = 'none';
         }
 
         function setBuilderMode(mode) {
@@ -2003,6 +2496,9 @@
                 } else {
                     alert('Please upload a CSV or JSON file');
                 }
+                
+                // Reset the file input so the same file can be selected again
+                event.target.value = '';
             };
             
             reader.readAsText(file);
@@ -2024,6 +2520,80 @@
             } catch (error) {
                 alert('Error parsing JSON: ' + error.message);
             }
+        }
+
+        function showScaleSelectionDialog(detectedMin, detectedMax, hasDecimals, responses, suggestedScale) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000;';
+            
+            const content = document.createElement('div');
+            content.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 20px; width: 500px; box-shadow: 0 20px 40px rgba(0, 57, 166, 0.3);';
+            
+            content.innerHTML = `
+                <h2 style="margin-bottom: 20px; color: #0039A6;">Confirm Data Scale</h2>
+                <p style="margin-bottom: 20px;">
+                    The uploaded data has values ranging from <strong>${detectedMin.toFixed(1)}</strong> to <strong>${detectedMax.toFixed(1)}</strong>.
+                    ${hasDecimals ? 'The data contains decimal values.' : 'The data contains only integer values.'}
+                </p>
+                <p style="margin-bottom: 20px;">${suggestedScale ? 'We detected the scale below. Please confirm or change it:' : 'Please select the appropriate scale for this data:'}</p>
+                
+                <div style="margin: 20px 0;">
+                    <select id="modal-scale-type" style="width: 100%; padding: 10px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px;">
+                        <option value="-5,5" ${suggestedScale === '-5,5' ? 'selected' : ''}>Bipolar (-5 to 5)</option>
+                        <option value="-3,3" ${suggestedScale === '-3,3' ? 'selected' : ''}>Bipolar (-3 to 3)</option>
+                        <option value="-2,2" ${suggestedScale === '-2,2' ? 'selected' : ''}>Bipolar (-2 to 2)</option>
+                        <option value="0,10" ${suggestedScale === '0,10' ? 'selected' : ''}>0-10 Scale</option>
+                        <option value="0,7" ${suggestedScale === '0,7' ? 'selected' : ''}>0-7 Scale</option>
+                        <option value="1,7" ${suggestedScale === '1,7' ? 'selected' : ''}>1-7 Likert</option>
+                        <option value="1,5" ${suggestedScale === '1,5' ? 'selected' : ''}>1-5 Likert</option>
+                    </select>
+                </div>
+                
+                <div style="margin: 20px 0;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="modal-allow-decimals" ${hasDecimals ? 'checked' : ''}>
+                        Allow Decimal Values
+                    </label>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 30px;">
+                    <button onclick="applyScaleSelection('${JSON.stringify(responses).replace(/'/g, "\\'")}', this)" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #0039A6, #CC0033); color: white; border: none; border-radius: 10px; cursor: pointer;">
+                        Apply Scale
+                    </button>
+                    <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="flex: 1; padding: 12px; background: #ccc; color: #333; border: none; border-radius: 10px; cursor: pointer;">
+                        Cancel
+                    </button>
+                </div>
+            `;
+            
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+        }
+
+        function applyScaleSelection(responsesJson, button) {
+            const modal = button.closest('[style*="position: fixed"]');
+            const selectedScale = modal.querySelector('#modal-scale-type').value;
+            const allowDec = modal.querySelector('#modal-allow-decimals').checked;
+            
+            // Apply the selected scale
+            document.getElementById('scale-type').value = selectedScale;
+            updateScaleType();
+            
+            document.getElementById('allow-decimals').checked = allowDec;
+            allowDecimals = allowDec;
+            
+            // Remove modal
+            modal.remove();
+            
+            // Continue processing with the selected scale
+            const responses = JSON.parse(responsesJson);
+            
+            // Update color scale
+            currentColorScale = detectDataRange(responses);
+            updateColorLegend();
+            
+            // Continue processing the data
+            continueProcessingData(responses);
         }
 
         function processSurveyCSV(csvString) {
@@ -2051,13 +2621,61 @@
         }
 
         function processUploadedData(responses) {
+            // Check if there's existing data and ask for confirmation
+            if (window.surveyData && window.surveyData.length > 0) {
+                if (!confirm('There is existing survey data loaded. Do you want to replace it with the new data?')) {
+                    return; // User clicked No/Cancel
+                }
+            }
+            
             // Store the uploaded data globally
             window.uploadedSurveyData = responses;
             
-            // Detect and set the appropriate color scale
-            currentColorScale = detectDataRange(responses);
-            console.log(`Detected data scale: ${currentColorScale}`);
-            updateColorLegend();
+            // Detect the data range
+            let detectedMin = Infinity;
+            let detectedMax = -Infinity;
+            let hasDecimals = false;
+            
+            responses.forEach(response => {
+                Object.keys(response).forEach(key => {
+                    if (key !== 'respondentId' && !isNaN(parseFloat(response[key]))) {
+                        const value = parseFloat(response[key]);
+                        detectedMin = Math.min(detectedMin, value);
+                        detectedMax = Math.max(detectedMax, value);
+                        if (value % 1 !== 0) {
+                            hasDecimals = true;
+                        }
+                    }
+                });
+            });
+            
+            // Try to match to a known scale
+            const scaleMatches = {
+                '-5,5': (min, max) => min >= -5 && max <= 5 && min < -3,
+                '-3,3': (min, max) => min >= -3 && max <= 3 && min < -1,
+                '-2,2': (min, max) => min >= -2 && max <= 2 && min < 0,
+                '0,10': (min, max) => min >= 0 && max <= 10 && max > 7,
+                '0,7': (min, max) => min >= 0 && max <= 7 && max > 5,
+                '1,7': (min, max) => min >= 1 && max <= 7,
+                '1,5': (min, max) => min >= 1 && max <= 5
+            };
+            
+            let detectedScale = null;
+            for (const [scale, matcher] of Object.entries(scaleMatches)) {
+                if (matcher(detectedMin, detectedMax)) {
+                    detectedScale = scale;
+                    break;
+                }
+            }
+            
+            // Always ask the user to confirm or select the scale
+            console.log('Showing scale selection dialog. Detected:', detectedScale, 'Min:', detectedMin, 'Max:', detectedMax);
+            showScaleSelectionDialog(detectedMin, detectedMax, hasDecimals, responses, detectedScale);
+        }
+        
+        function continueProcessingData(responses) {
+            // Store data globally for visualization
+            surveyData = responses;
             
             // Check if tree exists, if not offer to generate one
             if (treeBuilder.layers.length === 0 || treeBuilder.nodes.size === 0) {
@@ -4452,6 +5070,207 @@ You can now:
                 });
             }
         });
+        
+        // Initialize subtitle on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            const subtitle = document.getElementById('scale-subtitle');
+            if (subtitle && scaleDescriptions[currentScaleRange]) {
+                subtitle.textContent = scaleDescriptions[currentScaleRange];
+            }
+        });
+
+        // Settings Panel Functions
+        let nodeSize = 120;
+        let animationSpeed = 500;
+        let autoSaveInterval = null;
+
+        window.exportVisualizationAsPNG = function() {
+            const svg = document.getElementById('tree-svg');
+            const svgData = new XMLSerializer().serializeToString(svg);
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            canvas.width = 1200;
+            canvas.height = 800;
+            
+            img.onload = function() {
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+                
+                canvas.toBlob(function(blob) {
+                    const link = document.createElement('a');
+                    link.download = `tree-visualization-${Date.now()}.png`;
+                    link.href = URL.createObjectURL(blob);
+                    link.click();
+                });
+            };
+            
+            const blob = new Blob([svgData], { type: 'image/svg+xml' });
+            img.src = URL.createObjectURL(blob);
+        };
+
+        window.exportVisualizationAsPDF = () => alert('PDF export coming soon! Use PNG export for now.');
+        window.exportFullReport = () => alert('Full report generation coming soon!');
+        window.compareDatasets = () => alert('Dataset comparison coming soon!');
+        window.showAdvancedMetrics = () => alert('Advanced metrics dashboard coming soon!');
+
+        window.shareTree = function() {
+            const treeData = treeBuilder.exportTreeData();
+            const encoded = btoa(JSON.stringify(treeData));
+            const url = window.location.origin + window.location.pathname + '#tree=' + encoded;
+            
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Shareable link copied to clipboard!');
+            }).catch(() => {
+                prompt('Copy this link to share:', url);
+            });
+        };
+
+        window.exportForCollaboration = function() {
+            const exportData = {
+                tree: treeBuilder.exportTreeData(),
+                settings: {
+                    scale: currentScaleRange,
+                    allowDecimals: allowDecimals,
+                    colorScale: currentColorScale
+                },
+                surveyData: window.surveyData || [],
+                timestamp: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.download = `tree-collaboration-${Date.now()}.json`;
+            link.href = URL.createObjectURL(blob);
+            link.click();
+        };
+
+        window.showNodeSearch = function() {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000;';
+            
+            const content = document.createElement('div');
+            content.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 20px; width: 500px;';
+            
+            content.innerHTML = `
+                <h2 style="margin-bottom: 20px; color: #0039A6;">Search Nodes</h2>
+                <input type="text" id="node-search-input" placeholder="Enter search term..." 
+                    style="width: 100%; padding: 10px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px; margin-bottom: 20px;">
+                <div id="search-results" style="max-height: 300px; overflow-y: auto;"></div>
+                <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" 
+                    style="margin-top: 20px; padding: 10px 20px; background: #ccc; border: none; border-radius: 8px; cursor: pointer;">
+                    Close
+                </button>
+            `;
+            
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+            
+            const searchInput = document.getElementById('node-search-input');
+            searchInput.addEventListener('input', function(e) {
+                const searchTerm = e.target.value.toLowerCase();
+                const results = document.getElementById('search-results');
+                results.innerHTML = '';
+                
+                if (searchTerm.length > 0) {
+                    treeBuilder.nodes.forEach(node => {
+                        if (node.question.toLowerCase().includes(searchTerm)) {
+                            const resultDiv = document.createElement('div');
+                            resultDiv.style.cssText = 'padding: 10px; border: 1px solid #ddd; margin-bottom: 5px; border-radius: 5px; cursor: pointer;';
+                            resultDiv.textContent = `${node.question} (Layer ${node.depth})`;
+                            resultDiv.onclick = () => {
+                                treeBuilder.selectNode(node.id);
+                                modal.remove();
+                                document.getElementById('builder-panel').style.display = 'block';
+                                document.getElementById('settings-panel').style.display = 'none';
+                            };
+                            results.appendChild(resultDiv);
+                        }
+                    });
+                    
+                    if (results.innerHTML === '') {
+                        results.innerHTML = '<p style="color: #999;">No nodes found</p>';
+                    }
+                }
+            });
+            
+            searchInput.focus();
+        };
+
+        window.updateNodeSize = function(size) {
+            nodeSize = parseInt(size);
+            // Update visualization with new node size
+            visualizeTree();
+        };
+
+        window.updateAnimationSpeed = function(speed) {
+            animationSpeed = parseInt(speed);
+        };
+
+        window.toggleTooltips = function() {
+            const showTooltips = document.getElementById('show-tooltips').checked;
+            console.log('Tooltips:', showTooltips ? 'enabled' : 'disabled');
+        };
+
+        window.toggleGrid = function() {
+            const showGrid = document.getElementById('show-grid').checked;
+            const svg = document.getElementById('tree-svg');
+            
+            if (showGrid) {
+                let defs = svg.querySelector('defs');
+                if (!defs) {
+                    defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                    svg.appendChild(defs);
+                }
+                
+                if (!defs.querySelector('#grid')) {
+                    const pattern = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
+                    pattern.setAttribute('id', 'grid');
+                    pattern.setAttribute('width', '50');
+                    pattern.setAttribute('height', '50');
+                    pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+                    pattern.innerHTML = '<path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" stroke-width="1"/>';
+                    defs.appendChild(pattern);
+                }
+                
+                if (!svg.querySelector('#grid-background')) {
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('width', '100%');
+                    rect.setAttribute('height', '100%');
+                    rect.setAttribute('fill', 'url(#grid)');
+                    rect.setAttribute('id', 'grid-background');
+                    svg.insertBefore(rect, svg.firstChild);
+                }
+            } else {
+                const grid = svg.querySelector('#grid-background');
+                if (grid) grid.remove();
+            }
+        };
+
+        window.toggleAutoSave = function() {
+            const checkbox = document.getElementById('auto-save');
+            if (checkbox.checked) {
+                autoSaveInterval = setInterval(() => {
+                    saveTreeConfiguration();
+                    console.log('Auto-saved at', new Date().toLocaleTimeString());
+                }, 30000);
+            } else {
+                if (autoSaveInterval) {
+                    clearInterval(autoSaveInterval);
+                    autoSaveInterval = null;
+                }
+            }
+        };
+
+        window.undoAction = function() {
+            console.log('Undo functionality will be implemented soon');
+        };
+
+        window.redoAction = function() {
+            console.log('Redo functionality will be implemented soon');
+        };
     </script>
 </body>
 </html>
