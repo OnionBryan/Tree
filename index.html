@@ -636,6 +636,7 @@
                 this.question = question;
                 this.depth = depth;
                 this.threshold = threshold;
+                this.thresholdMode = 'manual'; // 'manual', 'mean', 'median', 'percentile'
                 this.score = score;
                 this.isTerminal = false;
                 this.x = 0;
@@ -791,6 +792,7 @@
                             id: node.id,
                             question: node.question,
                             threshold: node.threshold,
+                            thresholdMode: node.thresholdMode || 'manual',
                             score: node.score,
                             leftId: node.leftId,
                             rightId: node.rightId,
@@ -819,6 +821,7 @@
                         node.leftId = nodeData.leftId;
                         node.rightId = nodeData.rightId;
                         node.isTerminal = nodeData.isTerminal;
+                        node.thresholdMode = nodeData.thresholdMode || 'manual';
 
                         layer.nodes.push(node);
                         this.nodes.set(node.id, node);
@@ -873,9 +876,18 @@
                             <label>Default Score (${currentScaleMin} to ${currentScaleMax}) for testing:</label>
                             <input type="number" min="${currentScaleMin}" max="${currentScaleMax}" step="${allowDecimals ? '0.1' : '1'}" value="${node.score || ((currentScaleMin + currentScaleMax) / 2)}"
                                 onchange="treeBuilder.updateNodeProperties('${node.id}', {score: parseFloat(this.value)})">
+                            <label>Threshold Mode:</label>
+                            <select id="threshold-mode-${node.id}" onchange="updateThresholdMode('${node.id}', this.value)">
+                                <option value="manual" ${node.thresholdMode === 'manual' ? 'selected' : ''}>Manual</option>
+                                <option value="mean" ${node.thresholdMode === 'mean' ? 'selected' : ''}>Mean of Responses</option>
+                                <option value="median" ${node.thresholdMode === 'median' ? 'selected' : ''}>Median of Responses</option>
+                                <option value="percentile" ${node.thresholdMode === 'percentile' ? 'selected' : ''}>Percentile (75th)</option>
+                            </select>
                             <label>Threshold (triggers right branch if score ≥ threshold):</label>
-                            <input type="number" min="${currentScaleMin}" max="${currentScaleMax}" step="${allowDecimals ? '0.1' : '1'}" value="${node.threshold}"
+                            <input type="number" id="threshold-value-${node.id}" min="${currentScaleMin}" max="${currentScaleMax}" step="${allowDecimals ? '0.1' : '1'}" 
+                                value="${node.threshold}" ${node.thresholdMode !== 'manual' ? 'disabled' : ''}
                                 onchange="treeBuilder.updateNodeProperties('${node.id}', {threshold: parseFloat(this.value)})">
+                            ${node.thresholdMode !== 'manual' ? `<small style="color: var(--gsu-primary);">Auto-calculated: ${node.threshold.toFixed(2)}</small>` : ''}
                             ${index > 0 ? `
                                 <label>Connect as LEFT branch (score < threshold) of:</label>
                                 <select onchange="treeBuilder.setNodeAsLeftChild('${node.id}', this.value)">
@@ -1625,6 +1637,113 @@
             return Math.sqrt(sum);
         }
 
+        function autoCalculateAllThresholds() {
+            if (!window.uploadedSurveyData || window.uploadedSurveyData.length === 0) {
+                alert('No survey data loaded. Please upload survey data first.');
+                return;
+            }
+            
+            const modes = ['mean', 'median', 'percentile'];
+            const modeChoice = prompt(
+                'Choose threshold calculation method:\n' +
+                '1. Mean - Average of all responses\n' +
+                '2. Median - Middle value of all responses\n' +
+                '3. Percentile - 75th percentile\n' +
+                'Enter 1, 2, or 3:',
+                '1'
+            );
+            
+            let selectedMode = 'mean';
+            switch(modeChoice) {
+                case '2':
+                    selectedMode = 'median';
+                    break;
+                case '3':
+                    selectedMode = 'percentile';
+                    break;
+                default:
+                    selectedMode = 'mean';
+            }
+            
+            // Update all nodes with the selected threshold mode
+            let updatedCount = 0;
+            treeBuilder.nodes.forEach((node, nodeId) => {
+                updateThresholdMode(nodeId, selectedMode);
+                updatedCount++;
+            });
+            
+            if (updatedCount > 0) {
+                alert(`✅ Updated ${updatedCount} nodes with ${selectedMode.toUpperCase()} threshold calculation`);
+                visualizeTree();
+            } else {
+                alert('No nodes to update. Please build your tree first.');
+            }
+        }
+        
+        function updateThresholdMode(nodeId, mode) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+            
+            node.thresholdMode = mode;
+            
+            if (mode !== 'manual' && window.uploadedSurveyData && window.uploadedSurveyData.length > 0) {
+                // Calculate threshold based on all responses for this node's question
+                const values = [];
+                window.uploadedSurveyData.forEach(response => {
+                    // Find the value for this node's question
+                    const questionKey = node.question;
+                    if (response[questionKey] !== undefined) {
+                        values.push(parseFloat(response[questionKey]));
+                    }
+                });
+                
+                if (values.length > 0) {
+                    let calculatedThreshold = 0;
+                    
+                    switch (mode) {
+                        case 'mean':
+                            calculatedThreshold = values.reduce((a, b) => a + b, 0) / values.length;
+                            break;
+                        case 'median':
+                            const sorted = values.sort((a, b) => a - b);
+                            const mid = Math.floor(sorted.length / 2);
+                            calculatedThreshold = sorted.length % 2 !== 0 
+                                ? sorted[mid] 
+                                : (sorted[mid - 1] + sorted[mid]) / 2;
+                            break;
+                        case 'percentile':
+                            const sortedPercentile = values.sort((a, b) => a - b);
+                            const index = Math.ceil(sortedPercentile.length * 0.75) - 1;
+                            calculatedThreshold = sortedPercentile[index];
+                            break;
+                    }
+                    
+                    node.threshold = calculatedThreshold;
+                    
+                    // Update the UI
+                    const thresholdInput = document.getElementById(`threshold-value-${nodeId}`);
+                    if (thresholdInput) {
+                        thresholdInput.value = calculatedThreshold.toFixed(2);
+                        thresholdInput.disabled = true;
+                    }
+                }
+            } else if (mode === 'manual') {
+                // Enable manual input
+                const thresholdInput = document.getElementById(`threshold-value-${nodeId}`);
+                if (thresholdInput) {
+                    thresholdInput.disabled = false;
+                }
+            }
+            
+            treeBuilder.updateNodeProperties(nodeId, {
+                threshold: node.threshold,
+                thresholdMode: node.thresholdMode
+            });
+            
+            // Refresh the display to show the updated info
+            treeBuilder.updateLayersDisplay();
+        }
+
         function visualizeTree() {
             const container = document.getElementById('tree-container');
             const width = container.clientWidth;
@@ -2068,25 +2187,6 @@
             }
         }
 
-        function calculateRadialPositions(node, cx, cy, radius, startAngle, endAngle, level = 0) {
-            if (!node) return;
-
-            const angle = (startAngle + endAngle) / 2;
-            const r = radius * (level + 1) / 4;
-
-            node.x = cx + r * Math.cos(angle);
-            node.y = cy + r * Math.sin(angle);
-
-            if (node.left || node.right) {
-                const midAngle = (startAngle + endAngle) / 2;
-                if (node.left) {
-                    calculateRadialPositions(node.left, cx, cy, radius, startAngle, midAngle, level + 1);
-                }
-                if (node.right) {
-                    calculateRadialPositions(node.right, cx, cy, radius, midAngle, endAngle, level + 1);
-                }
-            }
-        }
 
         function drawLinks(svg, node) {
             if (!node) return;
@@ -2514,8 +2614,8 @@
                     return;
                 }
                 
-                // Automatically process all responses through the tree
-                processUploadedData(responses);
+                // Show field selector to let user identify ID vs score columns
+                showFieldSelector(responses);
                 
             } catch (error) {
                 alert('Error parsing JSON: ' + error.message);
@@ -2557,10 +2657,10 @@
                 </div>
                 
                 <div style="display: flex; gap: 10px; margin-top: 30px;">
-                    <button onclick="applyScaleSelection('${JSON.stringify(responses).replace(/'/g, "\\'")}', this)" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #0039A6, #CC0033); color: white; border: none; border-radius: 10px; cursor: pointer;">
+                    <button id="apply-scale-btn" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #0039A6, #CC0033); color: white; border: none; border-radius: 10px; cursor: pointer;">
                         Apply Scale
                     </button>
-                    <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="flex: 1; padding: 12px; background: #ccc; color: #333; border: none; border-radius: 10px; cursor: pointer;">
+                    <button id="cancel-scale-btn" style="flex: 1; padding: 12px; background: #ccc; color: #333; border: none; border-radius: 10px; cursor: pointer;">
                         Cancel
                     </button>
                 </div>
@@ -2568,6 +2668,34 @@
             
             modal.appendChild(content);
             document.body.appendChild(modal);
+            
+            // Add click handler for Cancel button
+            document.getElementById('cancel-scale-btn').onclick = function() {
+                modal.remove();
+            };
+            
+            // Add click handler for Apply button
+            document.getElementById('apply-scale-btn').onclick = function() {
+                const selectedScale = document.getElementById('modal-scale-type').value;
+                const allowDec = document.getElementById('modal-allow-decimals').checked;
+                
+                // Apply the selected scale
+                document.getElementById('scale-type').value = selectedScale;
+                updateScaleType();
+                
+                document.getElementById('allow-decimals').checked = allowDec;
+                allowDecimals = allowDec;
+                
+                // Remove modal
+                modal.remove();
+                
+                // Update color scale
+                currentColorScale = detectDataRange(responses);
+                updateColorLegend();
+                
+                // Continue processing the data
+                continueProcessingData(responses);
+            };
         }
 
         function applyScaleSelection(responsesJson, button) {
@@ -2613,11 +2741,154 @@
                     data.push(row);
                 }
                 
-                // Automatically process all responses through the tree
-                processUploadedData(data);
+                // Show field selector for CSV data
+                showFieldSelector(data);
             } catch (error) {
                 alert('Error parsing CSV: ' + error.message);
             }
+        }
+        
+        function showFieldSelector(rawData) {
+            if (!rawData || rawData.length === 0) return;
+            
+            // Get all field names from first record
+            const firstRecord = rawData[0];
+            const fields = Object.keys(firstRecord);
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000;';
+            modal.id = 'field-selector-modal';
+            
+            const content = document.createElement('div');
+            content.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 20px; width: 700px; max-height: 85vh; overflow-y: auto;';
+            
+            // Build ID selector dropdown
+            let idOptionsHtml = '<option value="">None (Auto-generate)</option>';
+            fields.forEach(field => {
+                idOptionsHtml += `<option value="${field}">${field}</option>`;
+            });
+            
+            // Build score fields checkboxes
+            let scoreFieldsHtml = '';
+            fields.forEach((field, index) => {
+                const sampleValue = firstRecord[field];
+                const isNumeric = !isNaN(parseFloat(sampleValue));
+                
+                scoreFieldsHtml += `
+                    <div style="margin: 8px 0; padding: 8px; border: 1px solid #eee; border-radius: 6px; background: ${index % 2 ? '#f9f9f9' : 'white'};">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="score-field-${field.replace(/[^a-zA-Z0-9]/g, '_')}" 
+                                value="${field}" 
+                                ${isNumeric && parseFloat(sampleValue) >= -10 && parseFloat(sampleValue) <= 10 ? 'checked' : ''}
+                                style="width: 18px; height: 18px;">
+                            <div style="flex: 1;">
+                                <strong>${field}</strong>
+                                <div style="color: #666; font-size: 12px;">
+                                    Sample value: ${sampleValue} ${isNumeric ? '(numeric)' : '(text)'}
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                `;
+            });
+            
+            content.innerHTML = `
+                <h2 style="margin-bottom: 20px; color: #0039A6;">Configure Data Import</h2>
+                
+                <div style="margin-bottom: 25px; padding: 15px; background: #f0f8ff; border-radius: 8px;">
+                    <h3 style="margin-bottom: 10px; color: #0039A6;">Step 1: Select ID/Label Field (Optional)</h3>
+                    <p style="margin-bottom: 10px; color: #666;">Choose which field contains the respondent ID or label:</p>
+                    <select id="id-field-selector" style="width: 100%; padding: 10px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px;">
+                        ${idOptionsHtml}
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 10px; color: #0039A6;">Step 2: Select Survey Score Fields</h3>
+                    <p style="margin-bottom: 10px; color: #666;">Check all fields that contain survey scores (uncheck ID fields and other non-score data):</p>
+                    <div style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: white;">
+                        ${scoreFieldsHtml}
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 10px;">
+                    <button id="process-fields-btn" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #0039A6, #CC0033); color: white; border: none; border-radius: 10px; cursor: pointer;">
+                        Process Data
+                    </button>
+                    <button id="cancel-field-selector" style="flex: 1; padding: 12px; background: #ccc; color: #333; border: none; border-radius: 10px; cursor: pointer;">
+                        Cancel
+                    </button>
+                </div>
+            `;
+            
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+            
+            // Add click handler for Cancel button
+            document.getElementById('cancel-field-selector').onclick = function() {
+                modal.remove();
+            };
+            
+            // Add click handler for Process button
+            document.getElementById('process-fields-btn').onclick = function() {
+                const processedData = [];
+                const selectedIdField = document.getElementById('id-field-selector').value;
+                
+                // Get all checked score fields
+                const scoreFields = [];
+                fields.forEach(field => {
+                    const sanitizedField = field.replace(/[^a-zA-Z0-9]/g, '_');
+                    const checkbox = document.getElementById(`score-field-${sanitizedField}`);
+                    if (checkbox && checkbox.checked) {
+                        scoreFields.push(field);
+                    }
+                });
+                
+                if (scoreFields.length === 0) {
+                    alert('Please select at least one score field');
+                    return;
+                }
+                
+                // Process each record
+                rawData.forEach((record, index) => {
+                    const processedRecord = {};
+                    
+                    // Add ID if selected
+                    if (selectedIdField) {
+                        processedRecord.respondentId = record[selectedIdField];
+                    } else {
+                        processedRecord.respondentId = `Respondent_${index + 1}`;
+                    }
+                    
+                    // Add all selected score fields
+                    let hasValidScores = false;
+                    scoreFields.forEach(field => {
+                        const value = record[field];
+                        if (value !== null && value !== undefined && value !== '') {
+                            const numValue = parseFloat(value);
+                            if (!isNaN(numValue)) {
+                                processedRecord[field] = numValue;
+                                hasValidScores = true;
+                            }
+                        }
+                    });
+                    
+                    // Only add if we have at least one valid score
+                    if (hasValidScores) {
+                        processedData.push(processedRecord);
+                    }
+                });
+                
+                modal.remove();
+                
+                if (processedData.length > 0) {
+                    console.log('Processing data with', processedData.length, 'records');
+                    console.log('Sample record:', processedData[0]);
+                    processUploadedData(processedData);
+                } else {
+                    alert('No valid survey data found after processing');
+                }
+            };
         }
 
         function processUploadedData(responses) {
@@ -2802,9 +3073,24 @@
 You can now:
 • View Statistical Analysis
 • View Shannon Information Theory
-• Change visualization to Heatmap or Distribution`;
+• Change visualization to Heatmap or Distribution
+• Auto-calculate thresholds based on data`;
             
             alert(message);
+            
+            // Add button to auto-calculate thresholds if not already present
+            if (!document.getElementById('auto-threshold-btn')) {
+                const buttonContainer = document.querySelector('.control-group');
+                if (buttonContainer) {
+                    const autoThresholdBtn = document.createElement('button');
+                    autoThresholdBtn.id = 'auto-threshold-btn';
+                    autoThresholdBtn.className = 'btn';
+                    autoThresholdBtn.textContent = '🎯 Auto-Calculate Thresholds';
+                    autoThresholdBtn.onclick = autoCalculateAllThresholds;
+                    autoThresholdBtn.style.background = 'linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant))';
+                    buttonContainer.appendChild(autoThresholdBtn);
+                }
+            }
         }
         
         function showDataMappingModal(data, format, headers = null) {
