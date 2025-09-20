@@ -432,6 +432,18 @@
 
         <div class="controls">
             <div class="control-group">
+                <label>Scale Type:</label>
+                <select id="scale-type" onchange="updateScaleType()" style="padding: 8px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px; background: white;">
+                    <option value="-5,5">-5 to +5 (11 points)</option>
+                    <option value="-3,3">-3 to +3 (7 points)</option>
+                    <option value="-2,2">-2 to +2 (5 points)</option>
+                    <option value="0,10">0 to 10 (11 points)</option>
+                    <option value="0,7">0 to 7 (8 points)</option>
+                    <option value="1,7">1 to 7 (7 points)</option>
+                    <option value="1,5">1 to 5 (5 points)</option>
+                </select>
+            </div>
+            <div class="control-group">
                 <label>Visualization:</label>
                 <select id="viz-mode" onchange="changeVisualization()">
                     <option value="standard">Standard Tree</option>
@@ -462,16 +474,12 @@
     <div id="score-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2000;">
         <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 20px; width: 500px; box-shadow: 0 20px 40px rgba(0, 57, 166, 0.3); border: 1px solid rgba(0, 57, 166, 0.1);">
             <h2 id="modal-question" style="margin-bottom: 20px; background: linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;"></h2>
-            <p style="color: #666; margin-bottom: 20px;">Please rate on a scale from -5 (Very Poor) to +5 (Industry Leader)</p>
+            <p id="scale-description" style="color: #666; margin-bottom: 20px;">Please rate on the selected scale</p>
             
             <div style="margin: 30px 0;">
                 <input type="range" id="score-slider" min="-5" max="5" step="0.1" value="0" style="width: 100%;">
-                <div style="display: flex; justify-content: space-between; margin-top: 10px;">
-                    <span style="color: #f44336;">-5<br>Very Poor</span>
-                    <span style="color: #FF9800;">-2.5<br>Poor</span>
-                    <span style="color: #FFC107;">0<br>Average</span>
-                    <span style="color: #8BC34A;">2.5<br>Good</span>
-                    <span style="color: #4CAF50;">5<br>Industry Leader</span>
+                <div id="scale-labels" style="display: flex; justify-content: space-between; margin-top: 10px;">
+                    <!-- Will be dynamically filled based on scale -->
                 </div>
             </div>
             
@@ -1082,6 +1090,20 @@
             return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
         }
 
+        // Get display name for current scale
+        function getScaleDisplayName() {
+            const scaleNames = {
+                '-5,5': '-5 to +5 (Bipolar)',
+                '-3,3': '-3 to +3 (Compact Bipolar)',
+                '-2,2': '-2 to +2 (Short Bipolar)',
+                '0,10': '0 to 10 (Extended)',
+                '0,7': '0 to 7 (Standard)',
+                '1,7': '1 to 7 (Traditional)',
+                '1,5': '1 to 5 (Likert)'
+            };
+            return scaleNames[currentScaleRange] || currentScaleRange;
+        }
+        
         // Update legend based on current color scale
         function updateColorLegend() {
             const legendDiv = document.getElementById('color-legend');
@@ -1102,7 +1124,7 @@
                 </div>
                 <div class="legend-item">
                     <span style="font-weight: bold; color: var(--gsu-primary);">
-                        Scale: ${currentColorScale.replace('_', ' ').toUpperCase()}
+                        Scale: ${getScaleDisplayName()}
                     </span>
                 </div>
             `;
@@ -1115,6 +1137,41 @@
         let builderMode = 'build';
         let currentSurveyNode = null;
         let scoreCallback = null;
+        
+        // Scale management
+        let currentScaleMin = -5;
+        let currentScaleMax = 5;
+        let currentScaleRange = '-5,5';
+        
+        // Update scale type based on dropdown
+        function updateScaleType() {
+            const scaleSelect = document.getElementById('scale-type');
+            currentScaleRange = scaleSelect.value;
+            const [min, max] = scaleSelect.value.split(',').map(Number);
+            currentScaleMin = min;
+            currentScaleMax = max;
+            
+            // Update color scale detection
+            const scaleMap = {
+                '-5,5': 'bipolar_5',
+                '-3,3': 'bipolar_3',
+                '-2,2': 'bipolar_3', // Use bipolar_3 for -2,2
+                '0,10': 'scale_10',
+                '0,7': 'unipolar_7',
+                '1,7': 'unipolar_7', // Use unipolar_7 for 1,7
+                '1,5': 'likert_5'
+            };
+            
+            currentColorScale = scaleMap[currentScaleRange] || 'bipolar_5';
+            updateColorLegend();
+            
+            // Update any existing visualizations
+            if (treeBuilder.nodes.size > 0) {
+                visualizeTree();
+            }
+            
+            console.log(`Scale updated: ${min} to ${max}, using color scale: ${currentColorScale}`);
+        }
 
         function changeVisualization() {
             const vizMode = document.getElementById('viz-mode').value;
@@ -1662,17 +1719,66 @@
         function showScoreModal(node) {
             currentSurveyNode = node;
             document.getElementById('modal-question').textContent = node.question;
-            document.getElementById('score-modal').style.display = 'block';
             
-            // Reset modal values
+            // Update scale description
+            const scaleDesc = document.getElementById('scale-description');
+            scaleDesc.textContent = `Please rate on a scale from ${currentScaleMin} to ${currentScaleMax}`;
+            
+            // Update slider attributes
             const slider = document.getElementById('score-slider');
             const input = document.getElementById('score-input');
             const display = document.getElementById('score-display');
             
-            slider.value = '0';
-            input.value = '0';
-            display.textContent = '0.0';
-            updateScoreDisplay(display, 0);
+            slider.min = currentScaleMin;
+            slider.max = currentScaleMax;
+            slider.step = '0.1';
+            
+            input.min = currentScaleMin;
+            input.max = currentScaleMax;
+            
+            // Calculate midpoint for initial value
+            const midpoint = (currentScaleMin + currentScaleMax) / 2;
+            slider.value = midpoint;
+            input.value = midpoint.toFixed(1);
+            display.textContent = midpoint.toFixed(1);
+            
+            // Update scale labels based on current scale
+            const labelsDiv = document.getElementById('scale-labels');
+            const scaleColors = colorScales[currentColorScale];
+            
+            // Create scale labels
+            let labelsHTML = '';
+            if (scaleColors && scaleColors.colors) {
+                // Show a few key points on the scale
+                const keyPoints = [];
+                
+                // Add min, max, and a few middle points
+                keyPoints.push(scaleColors.colors[0]);
+                if (scaleColors.colors.length > 4) {
+                    keyPoints.push(scaleColors.colors[Math.floor(scaleColors.colors.length / 3)]);
+                    keyPoints.push(scaleColors.colors[Math.floor(scaleColors.colors.length / 2)]);
+                    keyPoints.push(scaleColors.colors[Math.floor(2 * scaleColors.colors.length / 3)]);
+                }
+                keyPoints.push(scaleColors.colors[scaleColors.colors.length - 1]);
+                
+                keyPoints.forEach(point => {
+                    labelsHTML += `<span style="color: ${point.color}; font-size: 11px; text-align: center;">
+                        <strong>${point.value}</strong><br>${point.label}
+                    </span>`;
+                });
+            } else {
+                // Fallback labels
+                labelsHTML = `
+                    <span style="color: #CC0000;">${currentScaleMin}<br>Lowest</span>
+                    <span style="color: #FFF59D;">${midpoint}<br>Middle</span>
+                    <span style="color: #0039A6;">${currentScaleMax}<br>Highest</span>
+                `;
+            }
+            labelsDiv.innerHTML = labelsHTML;
+            
+            updateScoreDisplay(display, midpoint);
+            
+            document.getElementById('score-modal').style.display = 'block';
             
             // Sync slider and input
             slider.oninput = function() {
@@ -1684,7 +1790,7 @@
             
             input.oninput = function() {
                 const value = parseFloat(this.value);
-                if (!isNaN(value) && value >= -5 && value <= 5) {
+                if (!isNaN(value) && value >= currentScaleMin && value <= currentScaleMax) {
                     slider.value = value;
                     display.textContent = value.toFixed(1);
                     updateScoreDisplay(display, value);
@@ -1693,18 +1799,16 @@
         }
 
         function updateScoreDisplay(element, value) {
-            // Update color based on score
-            if (value >= 3) element.style.color = '#4CAF50';
-            else if (value >= 0) element.style.color = '#8BC34A';
-            else if (value >= -2) element.style.color = '#FF9800';
-            else element.style.color = '#f44336';
+            // Update color based on score using adaptive color scale
+            const color = getColorForValue(value, currentColorScale);
+            element.style.color = color;
         }
 
         function submitScore() {
             const score = parseFloat(document.getElementById('score-input').value);
             
-            if (isNaN(score) || score < -5 || score > 5) {
-                alert('Please enter a valid score between -5 and 5');
+            if (isNaN(score) || score < currentScaleMin || score > currentScaleMax) {
+                alert(`Please enter a valid score between ${currentScaleMin} and ${currentScaleMax}`);
                 return;
             }
             
