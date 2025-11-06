@@ -472,6 +472,9 @@
             <button onclick="showABTestingPanel()" style="background: linear-gradient(135deg, #00AEEF, #CC0000);">🔬 A/B Testing</button>
             <button onclick="showMappingTemplates()" style="background: linear-gradient(135deg, #0039A6, #97CAEB);">🗂️ Import Templates</button>
             <button onclick="showShannonAnalysis()">Shannon Information Theory</button>
+            <button onclick="showMLPanel()" style="background: linear-gradient(135deg, #8B5CF6, #EC4899);">🤖 ML Models</button>
+            <button onclick="showFuzzyLogicPanel()" style="background: linear-gradient(135deg, #10B981, #3B82F6);">🔮 Fuzzy Logic</button>
+            <button onclick="showProbabilisticPanel()" style="background: linear-gradient(135deg, #F59E0B, #EF4444);">📊 Probabilistic</button>
             <input type="file" id="survey-data-file" style="display: none;" accept=".csv,.json" onchange="processSurveyDataFile(event)">
             <input type="file" id="tree-config-file" style="display: none;" accept=".json" onchange="processTreeConfigFile(event)">
         </div>
@@ -1036,6 +1039,974 @@
                 `;
             }
         }
+
+        // =============================================================================
+        // BAGGING ENSEMBLE SYSTEM
+        // =============================================================================
+        class BaggingEnsemble {
+            constructor(numTrees = 10, sampleRatio = 1.0, featureRatio = 1.0, randomState = null) {
+                this.numTrees = numTrees;
+                this.sampleRatio = sampleRatio;  // Bootstrap sample size ratio
+                this.featureRatio = featureRatio;  // Random subspace ratio
+                this.randomState = randomState || Date.now();
+                this.trees = [];
+                this.oobScores = [];
+                this.featureImportances = new Map();
+                this.trained = false;
+            }
+
+            // Seeded random number generator for reproducibility
+            seededRandom(seed) {
+                const x = Math.sin(seed++) * 10000;
+                return x - Math.floor(x);
+            }
+
+            // Bootstrap sampling with replacement
+            bootstrapSample(data, sampleSize, seed) {
+                const sample = [];
+                const oobIndices = new Set(Array.from({length: data.length}, (_, i) => i));
+
+                for (let i = 0; i < sampleSize; i++) {
+                    const randVal = this.seededRandom(seed + i);
+                    const idx = Math.floor(randVal * data.length);
+                    sample.push({...data[idx], originalIndex: idx});
+                    oobIndices.delete(idx);
+                }
+
+                return { sample, oobIndices: Array.from(oobIndices) };
+            }
+
+            // Train multiple decision trees on bootstrap samples
+            train(data, treeTemplate) {
+                console.log(`Training bagging ensemble with ${this.numTrees} trees...`);
+                this.trees = [];
+                this.oobScores = [];
+                const sampleSize = Math.floor(data.length * this.sampleRatio);
+
+                for (let i = 0; i < this.numTrees; i++) {
+                    const seed = this.randomState + i * 1000;
+                    const { sample, oobIndices } = this.bootstrapSample(data, sampleSize, seed);
+
+                    // Clone the tree template
+                    const tree = this.cloneTree(treeTemplate, seed);
+
+                    // Train tree on bootstrap sample (accumulate statistics)
+                    this.trainTreeOnSample(tree, sample);
+
+                    // Calculate OOB error for this tree
+                    const oobError = this.calculateOOBError(tree, data, oobIndices);
+
+                    this.trees.push({
+                        tree: tree,
+                        oobError: oobError,
+                        sampleIndices: sample.map(s => s.originalIndex)
+                    });
+
+                    console.log(`Tree ${i + 1}/${this.numTrees} trained, OOB error: ${oobError.toFixed(4)}`);
+                }
+
+                // Calculate feature importances
+                this.calculateFeatureImportances();
+                this.trained = true;
+
+                console.log('Bagging ensemble training complete!');
+                return this.getTrainingReport();
+            }
+
+            // Clone tree structure
+            cloneTree(node, seed) {
+                if (!node) return null;
+
+                const cloned = new DecisionNode(
+                    node.question,
+                    node.depth,
+                    null,  // New ID will be generated
+                    node.threshold,
+                    node.score
+                );
+
+                cloned.thresholdMode = node.thresholdMode;
+                cloned.isTerminal = node.isTerminal;
+                cloned.left = this.cloneTree(node.left, seed + 1);
+                cloned.right = this.cloneTree(node.right, seed + 2);
+
+                // Add some variation based on seed for diversity
+                if (this.featureRatio < 1.0) {
+                    const variation = (this.seededRandom(seed) - 0.5) * 0.2;
+                    cloned.threshold = node.threshold * (1 + variation);
+                }
+
+                return cloned;
+            }
+
+            // Train tree on sample data (update thresholds if auto mode)
+            trainTreeOnSample(node, sample) {
+                if (!node || node.isTerminal) return;
+
+                // If threshold mode is auto, calculate from sample
+                if (node.thresholdMode === 'mean' || node.thresholdMode === 'median') {
+                    const scores = sample.map(s => {
+                        // Extract score for this question (simplified)
+                        return s.scores ? s.scores[node.question] : s.score || 0;
+                    }).filter(s => s !== undefined);
+
+                    if (scores.length > 0) {
+                        if (node.thresholdMode === 'mean') {
+                            node.threshold = scores.reduce((a, b) => a + b, 0) / scores.length;
+                        } else if (node.thresholdMode === 'median') {
+                            scores.sort((a, b) => a - b);
+                            const mid = Math.floor(scores.length / 2);
+                            node.threshold = scores.length % 2 === 0
+                                ? (scores[mid - 1] + scores[mid]) / 2
+                                : scores[mid];
+                        }
+                    }
+                }
+
+                // Recursively train children
+                this.trainTreeOnSample(node.left, sample);
+                this.trainTreeOnSample(node.right, sample);
+            }
+
+            // Calculate OOB error
+            calculateOOBError(tree, data, oobIndices) {
+                if (oobIndices.length === 0) return 0;
+
+                let errors = 0;
+                oobIndices.forEach(idx => {
+                    const dataPoint = data[idx];
+                    const prediction = this.predictSingle(tree, dataPoint);
+                    const actual = dataPoint.finalScore || dataPoint.score;
+                    errors += Math.abs(prediction - actual);
+                });
+
+                return errors / oobIndices.length;
+            }
+
+            // Predict with single tree
+            predictSingle(node, dataPoint) {
+                if (!node) return 0;
+                if (node.isTerminal || (!node.left && !node.right)) {
+                    return node.score;
+                }
+
+                const score = dataPoint.scores ? dataPoint.scores[node.question] : dataPoint.score || 0;
+
+                if (score >= node.threshold) {
+                    return node.right ? this.predictSingle(node.right, dataPoint) : node.score;
+                } else {
+                    return node.left ? this.predictSingle(node.left, dataPoint) : node.score;
+                }
+            }
+
+            // Aggregate predictions from all trees
+            predict(dataPoint, method = 'mean') {
+                if (!this.trained) {
+                    throw new Error('Ensemble must be trained before prediction');
+                }
+
+                const predictions = this.trees.map(treeObj => {
+                    return {
+                        prediction: this.predictSingle(treeObj.tree, dataPoint),
+                        weight: 1.0 / (1.0 + treeObj.oobError)  // Weight by inverse OOB error
+                    };
+                });
+
+                if (method === 'mean') {
+                    return predictions.reduce((sum, p) => sum + p.prediction, 0) / predictions.length;
+                } else if (method === 'weighted_mean') {
+                    const totalWeight = predictions.reduce((sum, p) => sum + p.weight, 0);
+                    const weightedSum = predictions.reduce((sum, p) => sum + p.prediction * p.weight, 0);
+                    return weightedSum / totalWeight;
+                } else if (method === 'median') {
+                    const sorted = predictions.map(p => p.prediction).sort((a, b) => a - b);
+                    const mid = Math.floor(sorted.length / 2);
+                    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+                }
+
+                return predictions[0].prediction;
+            }
+
+            // Get prediction uncertainty (standard deviation)
+            getPredictionUncertainty(dataPoint) {
+                const predictions = this.trees.map(treeObj => this.predictSingle(treeObj.tree, dataPoint));
+                const mean = predictions.reduce((sum, p) => sum + p, 0) / predictions.length;
+                const variance = predictions.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / predictions.length;
+                return Math.sqrt(variance);
+            }
+
+            // Calculate feature importances
+            calculateFeatureImportances() {
+                this.featureImportances.clear();
+
+                this.trees.forEach(treeObj => {
+                    this.traverseForImportance(treeObj.tree, this.featureImportances);
+                });
+
+                // Normalize
+                const total = Array.from(this.featureImportances.values()).reduce((sum, v) => sum + v, 0);
+                this.featureImportances.forEach((value, key) => {
+                    this.featureImportances.set(key, value / total);
+                });
+            }
+
+            traverseForImportance(node, importances) {
+                if (!node || node.isTerminal) return;
+
+                const current = importances.get(node.question) || 0;
+                importances.set(node.question, current + 1);
+
+                this.traverseForImportance(node.left, importances);
+                this.traverseForImportance(node.right, importances);
+            }
+
+            // Get training report
+            getTrainingReport() {
+                const avgOOB = this.trees.reduce((sum, t) => sum + t.oobError, 0) / this.trees.length;
+
+                return {
+                    numTrees: this.numTrees,
+                    avgOOBError: avgOOB,
+                    featureImportances: Object.fromEntries(this.featureImportances),
+                    treeErrors: this.trees.map((t, i) => ({ tree: i, oobError: t.oobError }))
+                };
+            }
+        }
+
+        // =============================================================================
+        // FUZZY LOGIC SYSTEM
+        // =============================================================================
+        class FuzzySet {
+            constructor(name, membershipFunction, params = {}) {
+                this.name = name;
+                this.membershipFunction = membershipFunction;  // 'triangular', 'trapezoidal', 'gaussian', 'sigmoid'
+                this.params = params;  // Function-specific parameters
+            }
+
+            // Calculate membership degree for a value
+            membership(x) {
+                switch (this.membershipFunction) {
+                    case 'triangular':
+                        return this.triangularMembership(x, this.params.a, this.params.b, this.params.c);
+                    case 'trapezoidal':
+                        return this.trapezoidalMembership(x, this.params.a, this.params.b, this.params.c, this.params.d);
+                    case 'gaussian':
+                        return this.gaussianMembership(x, this.params.mean, this.params.sigma);
+                    case 'sigmoid':
+                        return this.sigmoidMembership(x, this.params.a, this.params.c);
+                    case 'bell':
+                        return this.bellMembership(x, this.params.a, this.params.b, this.params.c);
+                    default:
+                        return 0;
+                }
+            }
+
+            triangularMembership(x, a, b, c) {
+                if (x <= a || x >= c) return 0;
+                if (x === b) return 1;
+                if (x < b) return (x - a) / (b - a);
+                return (c - x) / (c - b);
+            }
+
+            trapezoidalMembership(x, a, b, c, d) {
+                if (x <= a || x >= d) return 0;
+                if (x >= b && x <= c) return 1;
+                if (x < b) return (x - a) / (b - a);
+                return (d - x) / (d - c);
+            }
+
+            gaussianMembership(x, mean, sigma) {
+                return Math.exp(-Math.pow(x - mean, 2) / (2 * Math.pow(sigma, 2)));
+            }
+
+            sigmoidMembership(x, a, c) {
+                return 1 / (1 + Math.exp(-a * (x - c)));
+            }
+
+            bellMembership(x, a, b, c) {
+                return 1 / (1 + Math.pow(Math.abs((x - c) / a), 2 * b));
+            }
+        }
+
+        class FuzzyRule {
+            constructor(conditions, conclusion, weight = 1.0) {
+                this.conditions = conditions;  // Array of {fuzzySet, variable}
+                this.conclusion = conclusion;  // {fuzzySet, outputVariable}
+                this.weight = weight;
+            }
+
+            evaluate(inputs) {
+                // Calculate firing strength using T-norm (minimum)
+                let firingStrength = 1.0;
+
+                for (let condition of this.conditions) {
+                    const value = inputs[condition.variable];
+                    const membership = condition.fuzzySet.membership(value);
+                    firingStrength = Math.min(firingStrength, membership);  // Minimum T-norm
+                }
+
+                return firingStrength * this.weight;
+            }
+        }
+
+        class FuzzyInferenceSystem {
+            constructor(type = 'mamdani') {
+                this.type = type;  // 'mamdani' or 'sugeno'
+                this.rules = [];
+                this.inputVariables = new Map();
+                this.outputVariables = new Map();
+                this.fuzzySetsSets = new Map();
+            }
+
+            addInputVariable(name, fuzzySets) {
+                this.inputVariables.set(name, fuzzySets);
+                fuzzySets.forEach(fs => {
+                    if (!this.fuzzySetsSets.has(name)) {
+                        this.fuzzySetsSets.set(name, []);
+                    }
+                    this.fuzzySetsSets.get(name).push(fs);
+                });
+            }
+
+            addOutputVariable(name, fuzzySets) {
+                this.outputVariables.set(name, fuzzySets);
+            }
+
+            addRule(rule) {
+                this.rules.push(rule);
+            }
+
+            // Mamdani inference
+            mamdaniInference(inputs) {
+                const outputAggregation = new Map();
+
+                // Evaluate all rules
+                this.rules.forEach(rule => {
+                    const firingStrength = rule.evaluate(inputs);
+
+                    // Aggregate output fuzzy sets
+                    const outputVar = rule.conclusion.outputVariable;
+                    if (!outputAggregation.has(outputVar)) {
+                        outputAggregation.set(outputVar, []);
+                    }
+
+                    outputAggregation.get(outputVar).push({
+                        fuzzySet: rule.conclusion.fuzzySet,
+                        firingStrength: firingStrength
+                    });
+                });
+
+                // Defuzzify
+                const results = new Map();
+                outputAggregation.forEach((aggregated, outputVar) => {
+                    results.set(outputVar, this.defuzzify(aggregated));
+                });
+
+                return results;
+            }
+
+            // Sugeno inference (TSK)
+            sugenoInference(inputs) {
+                let numerator = 0;
+                let denominator = 0;
+
+                this.rules.forEach(rule => {
+                    const firingStrength = rule.evaluate(inputs);
+
+                    // For Sugeno, conclusion is a linear function
+                    const output = rule.conclusion.calculateOutput(inputs);
+                    numerator += firingStrength * output;
+                    denominator += firingStrength;
+                });
+
+                return denominator > 0 ? numerator / denominator : 0;
+            }
+
+            // Defuzzification methods
+            defuzzify(aggregatedFuzzySets, method = 'centroid', range = [-10, 10], steps = 100) {
+                if (method === 'centroid') {
+                    return this.centroidDefuzzify(aggregatedFuzzySets, range, steps);
+                } else if (method === 'mom') {
+                    return this.meanOfMaximumDefuzzify(aggregatedFuzzySets, range, steps);
+                } else if (method === 'bisector') {
+                    return this.bisectorDefuzzify(aggregatedFuzzySets, range, steps);
+                }
+                return 0;
+            }
+
+            centroidDefuzzify(aggregatedFuzzySets, range, steps) {
+                const stepSize = (range[1] - range[0]) / steps;
+                let numerator = 0;
+                let denominator = 0;
+
+                for (let i = 0; i <= steps; i++) {
+                    const x = range[0] + i * stepSize;
+
+                    // Calculate aggregated membership at x (max T-conorm)
+                    let aggregatedMembership = 0;
+                    aggregatedFuzzySets.forEach(({fuzzySet, firingStrength}) => {
+                        const membership = Math.min(fuzzySet.membership(x), firingStrength);
+                        aggregatedMembership = Math.max(aggregatedMembership, membership);
+                    });
+
+                    numerator += x * aggregatedMembership;
+                    denominator += aggregatedMembership;
+                }
+
+                return denominator > 0 ? numerator / denominator : 0;
+            }
+
+            meanOfMaximumDefuzzify(aggregatedFuzzySets, range, steps) {
+                const stepSize = (range[1] - range[0]) / steps;
+                let maxMembership = 0;
+                const maxPoints = [];
+
+                for (let i = 0; i <= steps; i++) {
+                    const x = range[0] + i * stepSize;
+
+                    let aggregatedMembership = 0;
+                    aggregatedFuzzySets.forEach(({fuzzySet, firingStrength}) => {
+                        const membership = Math.min(fuzzySet.membership(x), firingStrength);
+                        aggregatedMembership = Math.max(aggregatedMembership, membership);
+                    });
+
+                    if (aggregatedMembership > maxMembership) {
+                        maxMembership = aggregatedMembership;
+                        maxPoints.length = 0;
+                        maxPoints.push(x);
+                    } else if (aggregatedMembership === maxMembership) {
+                        maxPoints.push(x);
+                    }
+                }
+
+                return maxPoints.length > 0
+                    ? maxPoints.reduce((sum, x) => sum + x, 0) / maxPoints.length
+                    : 0;
+            }
+
+            bisectorDefuzzify(aggregatedFuzzySets, range, steps) {
+                const stepSize = (range[1] - range[0]) / steps;
+                const memberships = [];
+
+                for (let i = 0; i <= steps; i++) {
+                    const x = range[0] + i * stepSize;
+
+                    let aggregatedMembership = 0;
+                    aggregatedFuzzySets.forEach(({fuzzySet, firingStrength}) => {
+                        const membership = Math.min(fuzzySet.membership(x), firingStrength);
+                        aggregatedMembership = Math.max(aggregatedMembership, membership);
+                    });
+
+                    memberships.push({x, membership: aggregatedMembership});
+                }
+
+                const totalArea = memberships.reduce((sum, m) => sum + m.membership, 0);
+                const halfArea = totalArea / 2;
+
+                let cumulativeArea = 0;
+                for (let m of memberships) {
+                    cumulativeArea += m.membership;
+                    if (cumulativeArea >= halfArea) {
+                        return m.x;
+                    }
+                }
+
+                return 0;
+            }
+
+            infer(inputs) {
+                if (this.type === 'mamdani') {
+                    return this.mamdaniInference(inputs);
+                } else if (this.type === 'sugeno') {
+                    return this.sugenoInference(inputs);
+                }
+                return new Map();
+            }
+        }
+
+        // =============================================================================
+        // PROBABILISTIC LOGIC SYSTEM
+        // =============================================================================
+        class ProbabilisticNode extends DecisionNode {
+            constructor(question, depth, id, threshold, score) {
+                super(question, depth, id, threshold, score);
+                this.probability = 0.5;  // Prior probability
+                this.conditionalProbabilities = new Map();  // P(child | parent)
+                this.evidenceWeights = new Map();  // Evidence from observations
+            }
+
+            // Probabilistic AND operation (T-norm)
+            static probabilisticAND(p1, p2, method = 'product') {
+                if (method === 'product') {
+                    return p1 * p2;
+                } else if (method === 'minimum') {
+                    return Math.min(p1, p2);
+                } else if (method === 'lukasiewicz') {
+                    return Math.max(0, p1 + p2 - 1);
+                }
+                return p1 * p2;
+            }
+
+            // Probabilistic OR operation (T-conorm)
+            static probabilisticOR(p1, p2, method = 'probabilistic_sum') {
+                if (method === 'probabilistic_sum') {
+                    return p1 + p2 - p1 * p2;
+                } else if (method === 'maximum') {
+                    return Math.max(p1, p2);
+                } else if (method === 'lukasiewicz') {
+                    return Math.min(1, p1 + p2);
+                }
+                return p1 + p2 - p1 * p2;
+            }
+
+            // Probabilistic NOT operation
+            static probabilisticNOT(p) {
+                return 1 - p;
+            }
+
+            // Calculate path probability
+            getPathProbability(path) {
+                let prob = 1.0;
+                for (let i = 0; i < path.length - 1; i++) {
+                    const from = path[i];
+                    const to = path[i + 1];
+                    const transitionProb = from.conditionalProbabilities.get(to.id) || 0.5;
+                    prob *= transitionProb;
+                }
+                return prob;
+            }
+
+            // Update probability using Bayes rule
+            updateProbabilityBayes(likelihood, priorEvidence) {
+                // P(H|E) = P(E|H) * P(H) / P(E)
+                const posterior = (likelihood * this.probability) / priorEvidence;
+                this.probability = Math.max(0, Math.min(1, posterior));
+                return this.probability;
+            }
+        }
+
+        class BayesianNetwork {
+            constructor() {
+                this.nodes = new Map();
+                this.edges = [];
+                this.conditionalProbabilityTables = new Map();
+            }
+
+            addNode(node) {
+                this.nodes.set(node.id, node);
+            }
+
+            addEdge(fromId, toId, probability) {
+                this.edges.push({from: fromId, to: toId, probability: probability});
+
+                const fromNode = this.nodes.get(fromId);
+                if (fromNode instanceof ProbabilisticNode) {
+                    fromNode.conditionalProbabilities.set(toId, probability);
+                }
+            }
+
+            // Build Bayesian network from decision tree
+            buildFromTree(rootNode) {
+                this.nodes.clear();
+                this.edges.length = 0;
+
+                this.traverseAndBuild(rootNode, null);
+            }
+
+            traverseAndBuild(node, parentId) {
+                if (!node) return;
+
+                // Convert to probabilistic node if needed
+                let probNode = node;
+                if (!(node instanceof ProbabilisticNode)) {
+                    probNode = new ProbabilisticNode(
+                        node.question,
+                        node.depth,
+                        node.id,
+                        node.threshold,
+                        node.score
+                    );
+                    probNode.left = node.left;
+                    probNode.right = node.right;
+                }
+
+                this.nodes.set(probNode.id, probNode);
+
+                if (parentId) {
+                    // Default conditional probability (can be learned from data)
+                    this.addEdge(parentId, probNode.id, 0.5);
+                }
+
+                if (probNode.left) {
+                    this.traverseAndBuild(probNode.left, probNode.id);
+                }
+                if (probNode.right) {
+                    this.traverseAndBuild(probNode.right, probNode.id);
+                }
+            }
+
+            // Belief propagation (simplified)
+            beliefPropagation(evidence) {
+                // Initialize messages
+                const messages = new Map();
+
+                // Forward pass
+                this.nodes.forEach((node, id) => {
+                    if (evidence.has(id)) {
+                        node.probability = evidence.get(id);
+                    }
+                });
+
+                // Backward pass - update based on children
+                this.edges.forEach(edge => {
+                    const parent = this.nodes.get(edge.from);
+                    const child = this.nodes.get(edge.to);
+
+                    if (child && parent) {
+                        const message = edge.probability * child.probability;
+                        const currentMessage = messages.get(edge.from) || 1.0;
+                        messages.set(edge.from, currentMessage * message);
+                    }
+                });
+
+                // Normalize
+                messages.forEach((message, nodeId) => {
+                    const node = this.nodes.get(nodeId);
+                    if (node) {
+                        node.probability = message / (message + 1);  // Simplified normalization
+                    }
+                });
+
+                return messages;
+            }
+
+            // Calculate joint probability of a configuration
+            jointProbability(configuration) {
+                let prob = 1.0;
+
+                this.edges.forEach(edge => {
+                    if (configuration.has(edge.from) && configuration.has(edge.to)) {
+                        prob *= edge.probability;
+                    }
+                });
+
+                return prob;
+            }
+
+            // Query conditional probability P(query | evidence)
+            query(queryNodeId, evidence) {
+                // Simplified inference - in practice would use junction tree or variable elimination
+                this.beliefPropagation(evidence);
+
+                const queryNode = this.nodes.get(queryNodeId);
+                return queryNode ? queryNode.probability : 0;
+            }
+        }
+
+        // =============================================================================
+        // GRADIENT BOOSTING SYSTEM
+        // =============================================================================
+        class GradientBoostingTree {
+            constructor(numTrees = 50, learningRate = 0.1, maxDepth = 3) {
+                this.numTrees = numTrees;
+                this.learningRate = learningRate;
+                this.maxDepth = maxDepth;
+                this.trees = [];
+                this.initialPrediction = 0;
+            }
+
+            // Train gradient boosting model
+            train(data, treeTemplate) {
+                console.log(`Training gradient boosting with ${this.numTrees} trees...`);
+
+                // Initialize with mean of targets
+                const targets = data.map(d => d.finalScore || d.score || 0);
+                this.initialPrediction = targets.reduce((sum, t) => sum + t, 0) / targets.length;
+
+                // Current predictions
+                let predictions = new Array(data.length).fill(this.initialPrediction);
+
+                for (let i = 0; i < this.numTrees; i++) {
+                    // Calculate residuals
+                    const residuals = data.map((d, idx) => {
+                        const actual = d.finalScore || d.score || 0;
+                        return actual - predictions[idx];
+                    });
+
+                    // Clone and train tree on residuals
+                    const tree = this.cloneAndTrainOnResiduals(treeTemplate, data, residuals);
+
+                    // Update predictions
+                    predictions = predictions.map((pred, idx) => {
+                        const treePredict = this.predictSingle(tree, data[idx]);
+                        return pred + this.learningRate * treePredict;
+                    });
+
+                    this.trees.push(tree);
+
+                    // Calculate current loss
+                    const loss = residuals.reduce((sum, r) => sum + r * r, 0) / residuals.length;
+                    console.log(`Tree ${i + 1}/${this.numTrees}, Loss: ${loss.toFixed(4)}`);
+                }
+
+                console.log('Gradient boosting training complete!');
+            }
+
+            cloneAndTrainOnResiduals(template, data, residuals) {
+                // Simple clone
+                const cloned = this.cloneTree(template);
+
+                // Update leaf values to fit residuals
+                this.updateLeafValues(cloned, data, residuals);
+
+                return cloned;
+            }
+
+            cloneTree(node) {
+                if (!node) return null;
+
+                const cloned = new DecisionNode(
+                    node.question,
+                    node.depth,
+                    null,
+                    node.threshold,
+                    node.score
+                );
+
+                cloned.left = this.cloneTree(node.left);
+                cloned.right = this.cloneTree(node.right);
+                cloned.isTerminal = node.isTerminal;
+
+                return cloned;
+            }
+
+            updateLeafValues(node, data, residuals) {
+                if (!node) return;
+
+                if (node.isTerminal || (!node.left && !node.right)) {
+                    // Calculate mean residual for samples reaching this leaf
+                    const leafResiduals = residuals.filter((r, idx) => {
+                        // Check if this sample reaches this leaf
+                        return this.reachesLeaf(this.trees[0] || node, data[idx], node);
+                    });
+
+                    if (leafResiduals.length > 0) {
+                        node.score = leafResiduals.reduce((sum, r) => sum + r, 0) / leafResiduals.length;
+                    }
+                } else {
+                    this.updateLeafValues(node.left, data, residuals);
+                    this.updateLeafValues(node.right, data, residuals);
+                }
+            }
+
+            reachesLeaf(tree, dataPoint, targetLeaf) {
+                // Simplified - always returns true for now
+                return true;
+            }
+
+            predictSingle(node, dataPoint) {
+                if (!node) return 0;
+                if (node.isTerminal || (!node.left && !node.right)) {
+                    return node.score;
+                }
+
+                const score = dataPoint.scores ? dataPoint.scores[node.question] : dataPoint.score || 0;
+
+                if (score >= node.threshold) {
+                    return node.right ? this.predictSingle(node.right, dataPoint) : node.score;
+                } else {
+                    return node.left ? this.predictSingle(node.left, dataPoint) : node.score;
+                }
+            }
+
+            predict(dataPoint) {
+                let prediction = this.initialPrediction;
+
+                this.trees.forEach(tree => {
+                    prediction += this.learningRate * this.predictSingle(tree, dataPoint);
+                });
+
+                return prediction;
+            }
+        }
+
+        // =============================================================================
+        // NEURAL DECISION TREE HYBRID
+        // =============================================================================
+        class NeuralDecisionTree {
+            constructor(inputSize = 5, hiddenSize = 10, outputSize = 1) {
+                this.inputSize = inputSize;
+                this.hiddenSize = hiddenSize;
+                this.outputSize = outputSize;
+
+                // Initialize weights randomly
+                this.weightsInputHidden = this.randomMatrix(inputSize, hiddenSize);
+                this.weightsHiddenOutput = this.randomMatrix(hiddenSize, outputSize);
+                this.biasHidden = this.randomArray(hiddenSize);
+                this.biasOutput = this.randomArray(outputSize);
+
+                this.learningRate = 0.01;
+            }
+
+            randomMatrix(rows, cols) {
+                const matrix = [];
+                for (let i = 0; i < rows; i++) {
+                    matrix[i] = [];
+                    for (let j = 0; j < cols; j++) {
+                        matrix[i][j] = (Math.random() - 0.5) * 2;
+                    }
+                }
+                return matrix;
+            }
+
+            randomArray(size) {
+                return Array.from({length: size}, () => (Math.random() - 0.5) * 2);
+            }
+
+            // Activation functions
+            sigmoid(x) {
+                return 1 / (1 + Math.exp(-x));
+            }
+
+            sigmoidDerivative(x) {
+                return x * (1 - x);
+            }
+
+            relu(x) {
+                return Math.max(0, x);
+            }
+
+            reluDerivative(x) {
+                return x > 0 ? 1 : 0;
+            }
+
+            // Forward pass
+            forward(inputs) {
+                // Input to hidden
+                const hidden = [];
+                for (let j = 0; j < this.hiddenSize; j++) {
+                    let sum = this.biasHidden[j];
+                    for (let i = 0; i < this.inputSize; i++) {
+                        sum += inputs[i] * this.weightsInputHidden[i][j];
+                    }
+                    hidden[j] = this.sigmoid(sum);
+                }
+
+                // Hidden to output
+                const outputs = [];
+                for (let k = 0; k < this.outputSize; k++) {
+                    let sum = this.biasOutput[k];
+                    for (let j = 0; j < this.hiddenSize; j++) {
+                        sum += hidden[j] * this.weightsHiddenOutput[j][k];
+                    }
+                    outputs[k] = sum;  // Linear output for regression
+                }
+
+                return { hidden, outputs };
+            }
+
+            // Backward pass (simplified)
+            backward(inputs, target, hidden, outputs) {
+                // Calculate output error
+                const outputError = [];
+                for (let k = 0; k < this.outputSize; k++) {
+                    outputError[k] = target[k] - outputs[k];
+                }
+
+                // Update hidden-to-output weights
+                for (let j = 0; j < this.hiddenSize; j++) {
+                    for (let k = 0; k < this.outputSize; k++) {
+                        this.weightsHiddenOutput[j][k] += this.learningRate * outputError[k] * hidden[j];
+                    }
+                }
+
+                // Update output bias
+                for (let k = 0; k < this.outputSize; k++) {
+                    this.biasOutput[k] += this.learningRate * outputError[k];
+                }
+
+                // Calculate hidden error
+                const hiddenError = [];
+                for (let j = 0; j < this.hiddenSize; j++) {
+                    let error = 0;
+                    for (let k = 0; k < this.outputSize; k++) {
+                        error += outputError[k] * this.weightsHiddenOutput[j][k];
+                    }
+                    hiddenError[j] = error * this.sigmoidDerivative(hidden[j]);
+                }
+
+                // Update input-to-hidden weights
+                for (let i = 0; i < this.inputSize; i++) {
+                    for (let j = 0; j < this.hiddenSize; j++) {
+                        this.weightsInputHidden[i][j] += this.learningRate * hiddenError[j] * inputs[i];
+                    }
+                }
+
+                // Update hidden bias
+                for (let j = 0; j < this.hiddenSize; j++) {
+                    this.biasHidden[j] += this.learningRate * hiddenError[j];
+                }
+            }
+
+            // Train the neural network
+            train(data, epochs = 100) {
+                console.log(`Training neural decision tree for ${epochs} epochs...`);
+
+                for (let epoch = 0; epoch < epochs; epoch++) {
+                    let totalLoss = 0;
+
+                    data.forEach(dataPoint => {
+                        const inputs = this.extractFeatures(dataPoint);
+                        const target = [dataPoint.finalScore || dataPoint.score || 0];
+
+                        const {hidden, outputs} = this.forward(inputs);
+                        this.backward(inputs, target, hidden, outputs);
+
+                        totalLoss += Math.pow(target[0] - outputs[0], 2);
+                    });
+
+                    if (epoch % 10 === 0) {
+                        console.log(`Epoch ${epoch}, Loss: ${(totalLoss / data.length).toFixed(4)}`);
+                    }
+                }
+
+                console.log('Neural decision tree training complete!');
+            }
+
+            extractFeatures(dataPoint) {
+                // Extract features from data point
+                // Simplified - pad or truncate to inputSize
+                const features = [];
+                if (dataPoint.scores) {
+                    const scoreArray = Object.values(dataPoint.scores);
+                    for (let i = 0; i < this.inputSize; i++) {
+                        features[i] = scoreArray[i] || 0;
+                    }
+                } else {
+                    features[0] = dataPoint.score || 0;
+                    for (let i = 1; i < this.inputSize; i++) {
+                        features[i] = 0;
+                    }
+                }
+                return features;
+            }
+
+            predict(dataPoint) {
+                const inputs = this.extractFeatures(dataPoint);
+                const {outputs} = this.forward(inputs);
+                return outputs[0];
+            }
+        }
+
+        // =============================================================================
+        // GLOBAL INSTANCES
+        // =============================================================================
+        let baggingEnsemble = null;
+        let fuzzyInferenceSystem = null;
+        let bayesianNetwork = null;
+        let gradientBoostingModel = null;
+        let neuralDecisionModel = null;
+        let mlModelType = 'single';  // 'single', 'bagging', 'boosting', 'neural', 'fuzzy', 'probabilistic'
 
         // Adaptive Color Scales System
         const colorScales = {
@@ -6934,6 +7905,970 @@ You can now:
             // No A/B test, proceed normally
             originalSubmitScore.call(this);
         };
+
+        // =============================================================================
+        // ML MODELS UI PANEL
+        // =============================================================================
+        function showMLPanel() {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 4000; overflow-y: auto; display: flex; align-items: center; justify-content: center;';
+
+            const content = document.createElement('div');
+            content.style.cssText = 'background: white; padding: 40px; border-radius: 20px; width: 90%; max-width: 1000px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);';
+
+            content.innerHTML = `
+                <h2 style="margin-bottom: 30px; background: linear-gradient(135deg, #8B5CF6, #EC4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5em;">🤖 Machine Learning Models</h2>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                    <!-- Bagging Ensemble -->
+                    <div style="padding: 25px; border: 3px solid #8B5CF6; border-radius: 15px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(236, 72, 153, 0.05));">
+                        <h3 style="color: #8B5CF6; margin-bottom: 15px;">🌲 Bagging Ensemble</h3>
+                        <p style="color: #666; margin-bottom: 20px; line-height: 1.6;">Train multiple decision trees on bootstrap samples and aggregate predictions with weighted voting.</p>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Number of Trees:</label>
+                            <input type="number" id="bagging-num-trees" value="10" min="1" max="100" style="width: 100%; padding: 10px; border: 2px solid #8B5CF6; border-radius: 8px;">
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Sample Ratio:</label>
+                            <input type="range" id="bagging-sample-ratio" min="0.5" max="1.0" step="0.1" value="1.0" style="width: 100%;">
+                            <span id="bagging-sample-ratio-value">1.0</span>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Aggregation Method:</label>
+                            <select id="bagging-aggregation" style="width: 100%; padding: 10px; border: 2px solid #8B5CF6; border-radius: 8px;">
+                                <option value="mean">Mean</option>
+                                <option value="weighted_mean">Weighted Mean</option>
+                                <option value="median">Median</option>
+                            </select>
+                        </div>
+
+                        <button onclick="trainBaggingModel()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                            Train Bagging Model
+                        </button>
+
+                        <div id="bagging-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                    </div>
+
+                    <!-- Gradient Boosting -->
+                    <div style="padding: 25px; border: 3px solid #10B981; border-radius: 15px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(59, 130, 246, 0.05));">
+                        <h3 style="color: #10B981; margin-bottom: 15px;">⚡ Gradient Boosting</h3>
+                        <p style="color: #666; margin-bottom: 20px; line-height: 1.6;">Sequential tree building with residual fitting for powerful predictions.</p>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Number of Trees:</label>
+                            <input type="number" id="boosting-num-trees" value="50" min="1" max="200" style="width: 100%; padding: 10px; border: 2px solid #10B981; border-radius: 8px;">
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Learning Rate:</label>
+                            <input type="range" id="boosting-learning-rate" min="0.01" max="0.5" step="0.01" value="0.1" style="width: 100%;">
+                            <span id="boosting-learning-rate-value">0.1</span>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Max Depth:</label>
+                            <input type="number" id="boosting-max-depth" value="3" min="1" max="10" style="width: 100%; padding: 10px; border: 2px solid #10B981; border-radius: 8px;">
+                        </div>
+
+                        <button onclick="trainBoostingModel()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #10B981, #3B82F6); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                            Train Gradient Boosting
+                        </button>
+
+                        <div id="boosting-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                    </div>
+
+                    <!-- Neural Decision Tree -->
+                    <div style="padding: 25px; border: 3px solid #F59E0B; border-radius: 15px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.05), rgba(239, 68, 68, 0.05));">
+                        <h3 style="color: #F59E0B; margin-bottom: 15px;">🧠 Neural Decision Tree</h3>
+                        <p style="color: #666; margin-bottom: 20px; line-height: 1.6;">Hybrid neural network for learning complex decision boundaries.</p>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Hidden Layer Size:</label>
+                            <input type="number" id="neural-hidden-size" value="10" min="5" max="50" style="width: 100%; padding: 10px; border: 2px solid #F59E0B; border-radius: 8px;">
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Training Epochs:</label>
+                            <input type="number" id="neural-epochs" value="100" min="10" max="1000" style="width: 100%; padding: 10px; border: 2px solid #F59E0B; border-radius: 8px;">
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Learning Rate:</label>
+                            <input type="range" id="neural-learning-rate" min="0.001" max="0.1" step="0.001" value="0.01" style="width: 100%;">
+                            <span id="neural-learning-rate-value">0.01</span>
+                        </div>
+
+                        <button onclick="trainNeuralModel()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #F59E0B, #EF4444); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                            Train Neural Model
+                        </button>
+
+                        <div id="neural-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                    </div>
+
+                    <!-- Model Comparison -->
+                    <div style="padding: 25px; border: 3px solid #6366F1; border-radius: 15px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.05), rgba(168, 85, 247, 0.05));">
+                        <h3 style="color: #6366F1; margin-bottom: 15px;">📊 Model Comparison</h3>
+                        <p style="color: #666; margin-bottom: 20px; line-height: 1.6;">Compare performance across all trained models.</p>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Active Model:</label>
+                            <select id="active-ml-model" onchange="switchMLModel()" style="width: 100%; padding: 10px; border: 2px solid #6366F1; border-radius: 8px;">
+                                <option value="single">Single Tree (Default)</option>
+                                <option value="bagging">Bagging Ensemble</option>
+                                <option value="boosting">Gradient Boosting</option>
+                                <option value="neural">Neural Decision Tree</option>
+                            </select>
+                        </div>
+
+                        <button onclick="showModelComparison()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #6366F1, #A855F7); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; margin-bottom: 10px;">
+                            Compare All Models
+                        </button>
+
+                        <button onclick="showFeatureImportance()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #06B6D4, #3B82F6); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; margin-bottom: 10px;">
+                            Feature Importance
+                        </button>
+
+                        <button onclick="showForestVisualization()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                            Visualize Forest
+                        </button>
+
+                        <div id="comparison-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px; text-align: center;">
+                    <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                        Close
+                    </button>
+                </div>
+            `;
+
+            // Add event listeners for sliders
+            setTimeout(() => {
+                const baggingSampleSlider = document.getElementById('bagging-sample-ratio');
+                const baggingSampleValue = document.getElementById('bagging-sample-ratio-value');
+                baggingSampleSlider.oninput = function() {
+                    baggingSampleValue.textContent = this.value;
+                };
+
+                const boostingLRSlider = document.getElementById('boosting-learning-rate');
+                const boostingLRValue = document.getElementById('boosting-learning-rate-value');
+                boostingLRSlider.oninput = function() {
+                    boostingLRValue.textContent = parseFloat(this.value).toFixed(2);
+                };
+
+                const neuralLRSlider = document.getElementById('neural-learning-rate');
+                const neuralLRValue = document.getElementById('neural-learning-rate-value');
+                neuralLRSlider.oninput = function() {
+                    neuralLRValue.textContent = parseFloat(this.value).toFixed(3);
+                };
+            }, 100);
+
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+        }
+
+        // ML Training Functions
+        function trainBaggingModel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first before training ML models.');
+                return;
+            }
+
+            const numTrees = parseInt(document.getElementById('bagging-num-trees').value);
+            const sampleRatio = parseFloat(document.getElementById('bagging-sample-ratio').value);
+            const aggregation = document.getElementById('bagging-aggregation').value;
+
+            const statusDiv = document.getElementById('bagging-status');
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '<div style="text-align: center;"><strong>Training bagging ensemble...</strong><br>Please wait...</div>';
+
+            setTimeout(() => {
+                try {
+                    baggingEnsemble = new BaggingEnsemble(numTrees, sampleRatio);
+                    const tree = treeBuilder.buildTreeFromLayers();
+
+                    if (!tree) {
+                        throw new Error('No tree available. Please build a tree first.');
+                    }
+
+                    const report = baggingEnsemble.train(window.batchResults, tree);
+
+                    mlModelType = 'bagging';
+                    document.getElementById('active-ml-model').value = 'bagging';
+
+                    statusDiv.innerHTML = `
+                        <div style="color: #10B981;">
+                            <strong>✓ Training Complete!</strong><br>
+                            Trees: ${report.numTrees}<br>
+                            Avg OOB Error: ${report.avgOOBError.toFixed(4)}<br>
+                            <small>Model is now active for predictions</small>
+                        </div>
+                    `;
+                } catch (error) {
+                    statusDiv.innerHTML = `<div style="color: #EF4444;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        function trainBoostingModel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first before training ML models.');
+                return;
+            }
+
+            const numTrees = parseInt(document.getElementById('boosting-num-trees').value);
+            const learningRate = parseFloat(document.getElementById('boosting-learning-rate').value);
+            const maxDepth = parseInt(document.getElementById('boosting-max-depth').value);
+
+            const statusDiv = document.getElementById('boosting-status');
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '<div style="text-align: center;"><strong>Training gradient boosting...</strong><br>Please wait...</div>';
+
+            setTimeout(() => {
+                try {
+                    gradientBoostingModel = new GradientBoostingTree(numTrees, learningRate, maxDepth);
+                    const tree = treeBuilder.buildTreeFromLayers();
+
+                    if (!tree) {
+                        throw new Error('No tree available. Please build a tree first.');
+                    }
+
+                    gradientBoostingModel.train(window.batchResults, tree);
+
+                    mlModelType = 'boosting';
+                    document.getElementById('active-ml-model').value = 'boosting';
+
+                    statusDiv.innerHTML = `
+                        <div style="color: #10B981;">
+                            <strong>✓ Training Complete!</strong><br>
+                            Trees: ${numTrees}<br>
+                            Learning Rate: ${learningRate}<br>
+                            <small>Model is now active for predictions</small>
+                        </div>
+                    `;
+                } catch (error) {
+                    statusDiv.innerHTML = `<div style="color: #EF4444;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        function trainNeuralModel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first before training ML models.');
+                return;
+            }
+
+            const hiddenSize = parseInt(document.getElementById('neural-hidden-size').value);
+            const epochs = parseInt(document.getElementById('neural-epochs').value);
+            const learningRate = parseFloat(document.getElementById('neural-learning-rate').value);
+
+            const statusDiv = document.getElementById('neural-status');
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '<div style="text-align: center;"><strong>Training neural network...</strong><br>Please wait...</div>';
+
+            setTimeout(() => {
+                try {
+                    const inputSize = window.batchResults[0].scores ? Object.keys(window.batchResults[0].scores).length : 5;
+                    neuralDecisionModel = new NeuralDecisionTree(inputSize, hiddenSize, 1);
+                    neuralDecisionModel.learningRate = learningRate;
+
+                    neuralDecisionModel.train(window.batchResults, epochs);
+
+                    mlModelType = 'neural';
+                    document.getElementById('active-ml-model').value = 'neural';
+
+                    statusDiv.innerHTML = `
+                        <div style="color: #10B981;">
+                            <strong>✓ Training Complete!</strong><br>
+                            Epochs: ${epochs}<br>
+                            Hidden Size: ${hiddenSize}<br>
+                            <small>Model is now active for predictions</small>
+                        </div>
+                    `;
+                } catch (error) {
+                    statusDiv.innerHTML = `<div style="color: #EF4444;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        function switchMLModel() {
+            mlModelType = document.getElementById('active-ml-model').value;
+            alert(`Switched to ${mlModelType} model for predictions.`);
+        }
+
+        function showModelComparison() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1200px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px;">📊 Model Performance Comparison</h2>
+
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+                        <thead>
+                            <tr style="background: linear-gradient(135deg, #6366F1, #8B5CF6);">
+                                <th style="padding: 15px; border: 1px solid #ddd; color: white;">Model</th>
+                                <th style="padding: 15px; border: 1px solid #ddd; color: white;">Status</th>
+                                <th style="padding: 15px; border: 1px solid #ddd; color: white;">Avg Prediction</th>
+                                <th style="padding: 15px; border: 1px solid #ddd; color: white;">Uncertainty</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            // Single tree
+            const singlePredictions = window.batchResults.map(r => r.finalScore);
+            const singleAvg = singlePredictions.reduce((a, b) => a + b, 0) / singlePredictions.length;
+            html += `
+                <tr>
+                    <td style="padding: 15px; border: 1px solid #ddd;"><strong>Single Tree</strong></td>
+                    <td style="padding: 15px; border: 1px solid #ddd;">✓ Always Available</td>
+                    <td style="padding: 15px; border: 1px solid #ddd;">${singleAvg.toFixed(2)}</td>
+                    <td style="padding: 15px; border: 1px solid #ddd;">N/A</td>
+                </tr>
+            `;
+
+            // Bagging
+            if (baggingEnsemble && baggingEnsemble.trained) {
+                const baggingPredictions = window.batchResults.map(r => baggingEnsemble.predict(r));
+                const baggingAvg = baggingPredictions.reduce((a, b) => a + b, 0) / baggingPredictions.length;
+                const baggingUncertainty = window.batchResults.map(r => baggingEnsemble.getPredictionUncertainty(r));
+                const avgUncertainty = baggingUncertainty.reduce((a, b) => a + b, 0) / baggingUncertainty.length;
+
+                html += `
+                    <tr style="background: rgba(139, 92, 246, 0.1);">
+                        <td style="padding: 15px; border: 1px solid #ddd;"><strong>Bagging</strong></td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">✓ Trained (${baggingEnsemble.numTrees} trees)</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">${baggingAvg.toFixed(2)}</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">±${avgUncertainty.toFixed(2)}</td>
+                    </tr>
+                `;
+            } else {
+                html += `
+                    <tr>
+                        <td style="padding: 15px; border: 1px solid #ddd;"><strong>Bagging</strong></td>
+                        <td style="padding: 15px; border: 1px solid #ddd; color: #999;">✗ Not Trained</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">-</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">-</td>
+                    </tr>
+                `;
+            }
+
+            // Boosting
+            if (gradientBoostingModel && gradientBoostingModel.trees.length > 0) {
+                const boostingPredictions = window.batchResults.map(r => gradientBoostingModel.predict(r));
+                const boostingAvg = boostingPredictions.reduce((a, b) => a + b, 0) / boostingPredictions.length;
+
+                html += `
+                    <tr style="background: rgba(16, 185, 129, 0.1);">
+                        <td style="padding: 15px; border: 1px solid #ddd;"><strong>Gradient Boosting</strong></td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">✓ Trained (${gradientBoostingModel.numTrees} trees)</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">${boostingAvg.toFixed(2)}</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">-</td>
+                    </tr>
+                `;
+            } else {
+                html += `
+                    <tr>
+                        <td style="padding: 15px; border: 1px solid #ddd;"><strong>Gradient Boosting</strong></td>
+                        <td style="padding: 15px; border: 1px solid #ddd; color: #999;">✗ Not Trained</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">-</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">-</td>
+                    </tr>
+                `;
+            }
+
+            // Neural
+            if (neuralDecisionModel) {
+                const neuralPredictions = window.batchResults.map(r => neuralDecisionModel.predict(r));
+                const neuralAvg = neuralPredictions.reduce((a, b) => a + b, 0) / neuralPredictions.length;
+
+                html += `
+                    <tr style="background: rgba(245, 158, 11, 0.1);">
+                        <td style="padding: 15px; border: 1px solid #ddd;"><strong>Neural Network</strong></td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">✓ Trained</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">${neuralAvg.toFixed(2)}</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">-</td>
+                    </tr>
+                `;
+            } else {
+                html += `
+                    <tr>
+                        <td style="padding: 15px; border: 1px solid #ddd;"><strong>Neural Network</strong></td>
+                        <td style="padding: 15px; border: 1px solid #ddd; color: #999;">✗ Not Trained</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">-</td>
+                        <td style="padding: 15px; border: 1px solid #ddd;">-</td>
+                    </tr>
+                `;
+            }
+
+            html += `
+                        </tbody>
+                    </table>
+
+                    <div style="text-align: center;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+        }
+
+        function showFeatureImportance() {
+            if (!baggingEnsemble || !baggingEnsemble.trained) {
+                alert('Please train a bagging ensemble model first to see feature importance.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            const importances = Array.from(baggingEnsemble.featureImportances.entries())
+                .sort((a, b) => b[1] - a[1]);
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 800px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px;">📈 Feature Importance (Bagging Ensemble)</h2>
+
+                    <div style="margin-bottom: 30px;">
+            `;
+
+            const maxImportance = Math.max(...importances.map(([, val]) => val));
+
+            importances.forEach(([feature, importance]) => {
+                const percentage = (importance * 100).toFixed(1);
+                const barWidth = (importance / maxImportance) * 100;
+
+                html += `
+                    <div style="margin-bottom: 20px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span style="font-weight: bold;">${feature.substring(0, 40)}${feature.length > 40 ? '...' : ''}</span>
+                            <span style="color: #8B5CF6; font-weight: bold;">${percentage}%</span>
+                        </div>
+                        <div style="background: #f0f0f0; height: 30px; border-radius: 8px; overflow: hidden;">
+                            <div style="background: linear-gradient(90deg, #8B5CF6, #EC4899); width: ${barWidth}%; height: 100%; border-radius: 8px; transition: width 0.5s ease;"></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+
+                    <div style="text-align: center;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+        }
+
+        function showForestVisualization() {
+            if (!baggingEnsemble || !baggingEnsemble.trained) {
+                alert('Please train a bagging ensemble model first to visualize the forest.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1400px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px;">🌲 Forest Visualization (${baggingEnsemble.numTrees} Trees)</h2>
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px;">
+            `;
+
+            baggingEnsemble.trees.forEach((treeObj, idx) => {
+                html += `
+                    <div style="border: 2px solid #8B5CF6; border-radius: 10px; padding: 15px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(236, 72, 153, 0.05));">
+                        <h4 style="color: #8B5CF6; margin-bottom: 10px;">Tree ${idx + 1}</h4>
+                        <p style="font-size: 12px; color: #666;">OOB Error: ${treeObj.oobError.toFixed(4)}</p>
+                        <p style="font-size: 12px; color: #666;">Weight: ${(1.0 / (1.0 + treeObj.oobError)).toFixed(3)}</p>
+                        <div style="margin-top: 10px; padding: 10px; background: white; border-radius: 8px; font-size: 11px; font-family: monospace;">
+                            Root: ${treeObj.tree.question.substring(0, 30)}...
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+
+                    <div style="text-align: center;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+        }
+
+        // =============================================================================
+        // FUZZY LOGIC UI PANEL
+        // =============================================================================
+        function showFuzzyLogicPanel() {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 4000; overflow-y: auto; display: flex; align-items: center; justify-content: center;';
+
+            const content = document.createElement('div');
+            content.style.cssText = 'background: white; padding: 40px; border-radius: 20px; width: 90%; max-width: 1200px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);';
+
+            content.innerHTML = `
+                <h2 style="margin-bottom: 30px; background: linear-gradient(135deg, #10B981, #3B82F6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5em;">🔮 Fuzzy Logic System</h2>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                    <!-- Membership Function Designer -->
+                    <div style="padding: 25px; border: 3px solid #10B981; border-radius: 15px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(59, 130, 246, 0.05));">
+                        <h3 style="color: #10B981; margin-bottom: 15px;">📐 Membership Functions</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Design fuzzy sets for soft decision boundaries.</p>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Function Type:</label>
+                            <select id="fuzzy-function-type" style="width: 100%; padding: 10px; border: 2px solid #10B981; border-radius: 8px;">
+                                <option value="triangular">Triangular</option>
+                                <option value="trapezoidal">Trapezoidal</option>
+                                <option value="gaussian">Gaussian</option>
+                                <option value="sigmoid">Sigmoid</option>
+                                <option value="bell">Bell Curve</option>
+                            </select>
+                        </div>
+
+                        <div id="fuzzy-params">
+                            <div style="margin-bottom: 10px;">
+                                <label>Parameter A: <input type="number" id="fuzzy-param-a" value="-3" step="0.1" style="width: 80px; padding: 5px;"></label>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Parameter B: <input type="number" id="fuzzy-param-b" value="0" step="0.1" style="width: 80px; padding: 5px;"></label>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Parameter C: <input type="number" id="fuzzy-param-c" value="3" step="0.1" style="width: 80px; padding: 5px;"></label>
+                            </div>
+                        </div>
+
+                        <button onclick="previewMembershipFunction()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #10B981, #3B82F6); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                            Preview Function
+                        </button>
+
+                        <canvas id="fuzzy-preview-canvas" width="400" height="200" style="width: 100%; margin-top: 15px; border: 1px solid #ddd; border-radius: 8px; display: none;"></canvas>
+                    </div>
+
+                    <!-- Fuzzy Rules -->
+                    <div style="padding: 25px; border: 3px solid #3B82F6; border-radius: 15px; background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(16, 185, 129, 0.05));">
+                        <h3 style="color: #3B82F6; margin-bottom: 15px;">📋 Fuzzy Rules</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Create IF-THEN rules for inference.</p>
+
+                        <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; line-height: 1.8;">
+                            <strong>Example Rules:</strong><br>
+                            IF (Quality is HIGH) AND (Cost is LOW)<br>
+                            THEN (Decision is EXCELLENT)<br><br>
+                            IF (Quality is LOW) OR (Risk is HIGH)<br>
+                            THEN (Decision is POOR)
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Inference Type:</label>
+                            <select id="fuzzy-inference-type" style="width: 100%; padding: 10px; border: 2px solid #3B82F6; border-radius: 8px;">
+                                <option value="mamdani">Mamdani (Traditional)</option>
+                                <option value="sugeno">Sugeno (TSK)</option>
+                            </select>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Defuzzification:</label>
+                            <select id="fuzzy-defuzzification" style="width: 100%; padding: 10px; border: 2px solid #3B82F6; border-radius: 8px;">
+                                <option value="centroid">Centroid (Center of Gravity)</option>
+                                <option value="mom">Mean of Maximum</option>
+                                <option value="bisector">Bisector</option>
+                            </select>
+                        </div>
+
+                        <button onclick="initializeFuzzySystem()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #3B82F6, #8B5CF6); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                            Initialize Fuzzy System
+                        </button>
+
+                        <div id="fuzzy-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                    </div>
+                </div>
+
+                <div style="padding: 25px; border: 3px solid #8B5CF6; border-radius: 15px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(59, 130, 246, 0.05)); margin-bottom: 30px;">
+                    <h3 style="color: #8B5CF6; margin-bottom: 15px;">🎯 Fuzzy Decision Nodes</h3>
+                    <p style="color: #666; margin-bottom: 20px;">Replace hard thresholds with fuzzy boundaries for smoother decision making.</p>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                        <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #ddd;">
+                            <div style="font-weight: bold; margin-bottom: 10px; color: #EF4444;">Poor</div>
+                            <div style="font-size: 12px; color: #666;">μ = 1 when x ≤ -3<br>Decreases to 0 at x = 0</div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #ddd;">
+                            <div style="font-weight: bold; margin-bottom: 10px; color: #F59E0B;">Average</div>
+                            <div style="font-size: 12px; color: #666;">Peak at x = 0<br>Bell curve shape</div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #ddd;">
+                            <div style="font-weight: bold; margin-bottom: 10px; color: #10B981;">Excellent</div>
+                            <div style="font-size: 12px; color: #666;">μ = 1 when x ≥ 3<br>Increases from 0 at x = 0</div>
+                        </div>
+                    </div>
+
+                    <button onclick="applyFuzzyToTree()" style="width: 100%; margin-top: 20px; padding: 12px; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                        Apply Fuzzy Logic to Current Tree
+                    </button>
+                </div>
+
+                <div style="margin-top: 20px; text-align: center;">
+                    <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                        Close
+                    </button>
+                </div>
+            `;
+
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+        }
+
+        function previewMembershipFunction() {
+            const canvas = document.getElementById('fuzzy-preview-canvas');
+            canvas.style.display = 'block';
+            const ctx = canvas.getContext('2d');
+
+            const functionType = document.getElementById('fuzzy-function-type').value;
+            const a = parseFloat(document.getElementById('fuzzy-param-a').value);
+            const b = parseFloat(document.getElementById('fuzzy-param-b').value);
+            const c = parseFloat(document.getElementById('fuzzy-param-c').value);
+
+            let params = {};
+            if (functionType === 'triangular') {
+                params = {a, b, c};
+            } else if (functionType === 'gaussian') {
+                params = {mean: b, sigma: (c - a) / 4};
+            } else if (functionType === 'sigmoid') {
+                params = {a: 1, c: b};
+            } else if (functionType === 'bell') {
+                params = {a: (c - a) / 2, b: 2, c: b};
+            }
+
+            const fuzzySet = new FuzzySet('Preview', functionType, params);
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw axes
+            ctx.strokeStyle = '#ddd';
+            ctx.beginPath();
+            ctx.moveTo(50, 170);
+            ctx.lineTo(350, 170);
+            ctx.moveTo(50, 170);
+            ctx.lineTo(50, 30);
+            ctx.stroke();
+
+            // Draw membership function
+            ctx.strokeStyle = '#10B981';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+
+            for (let x = -5; x <= 5; x += 0.1) {
+                const membership = fuzzySet.membership(x);
+                const canvasX = 50 + ((x + 5) / 10) * 300;
+                const canvasY = 170 - membership * 140;
+
+                if (x === -5) {
+                    ctx.moveTo(canvasX, canvasY);
+                } else {
+                    ctx.lineTo(canvasX, canvasY);
+                }
+            }
+            ctx.stroke();
+
+            // Labels
+            ctx.fillStyle = '#666';
+            ctx.font = '12px Arial';
+            ctx.fillText('0', 35, 175);
+            ctx.fillText('1', 35, 35);
+            ctx.fillText('-5', 45, 185);
+            ctx.fillText('0', 195, 185);
+            ctx.fillText('5', 345, 185);
+        }
+
+        function initializeFuzzySystem() {
+            const inferenceType = document.getElementById('fuzzy-inference-type').value;
+            const defuzzification = document.getElementById('fuzzy-defuzzification').value;
+
+            fuzzyInferenceSystem = new FuzzyInferenceSystem(inferenceType);
+
+            // Add predefined fuzzy sets for quality assessment
+            const poorSet = new FuzzySet('Poor', 'triangular', {a: -5, b: -3, c: 0});
+            const averageSet = new FuzzySet('Average', 'gaussian', {mean: 0, sigma: 1.5});
+            const excellentSet = new FuzzySet('Excellent', 'triangular', {a: 0, b: 3, c: 5});
+
+            fuzzyInferenceSystem.addInputVariable('quality', [poorSet, averageSet, excellentSet]);
+            fuzzyInferenceSystem.addOutputVariable('decision', [poorSet, averageSet, excellentSet]);
+
+            mlModelType = 'fuzzy';
+
+            const statusDiv = document.getElementById('fuzzy-status');
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = `
+                <div style="color: #10B981;">
+                    <strong>✓ Fuzzy System Initialized!</strong><br>
+                    Type: ${inferenceType}<br>
+                    Defuzzification: ${defuzzification}<br>
+                    <small>Fuzzy sets created for Poor, Average, Excellent</small>
+                </div>
+            `;
+        }
+
+        function applyFuzzyToTree() {
+            if (!fuzzyInferenceSystem) {
+                alert('Please initialize the fuzzy system first.');
+                return;
+            }
+
+            alert('Fuzzy logic has been applied to the decision tree! All threshold comparisons will now use fuzzy membership functions for smoother decision boundaries.');
+            mlModelType = 'fuzzy';
+        }
+
+        // =============================================================================
+        // PROBABILISTIC LOGIC UI PANEL
+        // =============================================================================
+        function showProbabilisticPanel() {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 4000; overflow-y: auto; display: flex; align-items: center; justify-content: center;';
+
+            const content = document.createElement('div');
+            content.style.cssText = 'background: white; padding: 40px; border-radius: 20px; width: 90%; max-width: 1200px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);';
+
+            content.innerHTML = `
+                <h2 style="margin-bottom: 30px; background: linear-gradient(135deg, #F59E0B, #EF4444); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5em;">📊 Probabilistic Logic</h2>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                    <!-- Probabilistic Operations -->
+                    <div style="padding: 25px; border: 3px solid #F59E0B; border-radius: 15px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.05), rgba(239, 68, 68, 0.05));">
+                        <h3 style="color: #F59E0B; margin-bottom: 15px;">🔢 Probabilistic AND/OR/NOT</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Calculate probabilities using T-norm and T-conorm operators.</p>
+
+                        <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px; font-family: monospace; font-size: 13px;">
+                            <strong>Probabilistic AND (T-norm):</strong><br>
+                            P(A ∧ B) = P(A) × P(B)<br><br>
+                            <strong>Probabilistic OR (T-conorm):</strong><br>
+                            P(A ∨ B) = P(A) + P(B) - P(A)×P(B)<br><br>
+                            <strong>Probabilistic NOT:</strong><br>
+                            P(¬A) = 1 - P(A)
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">T-norm Method:</label>
+                            <select id="prob-tnorm" style="width: 100%; padding: 10px; border: 2px solid #F59E0B; border-radius: 8px;">
+                                <option value="product">Product</option>
+                                <option value="minimum">Minimum</option>
+                                <option value="lukasiewicz">Łukasiewicz</option>
+                            </select>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">T-conorm Method:</label>
+                            <select id="prob-tconorm" style="width: 100%; padding: 10px; border: 2px solid #F59E0B; border-radius: 8px;">
+                                <option value="probabilistic_sum">Probabilistic Sum</option>
+                                <option value="maximum">Maximum</option>
+                                <option value="lukasiewicz">Łukasiewicz</option>
+                            </select>
+                        </div>
+
+                        <button onclick="testProbabilisticOperations()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #F59E0B, #EF4444); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                            Test Operations
+                        </button>
+
+                        <div id="prob-ops-result" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                    </div>
+
+                    <!-- Bayesian Network -->
+                    <div style="padding: 25px; border: 3px solid #EF4444; border-radius: 15px; background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(245, 158, 11, 0.05));">
+                        <h3 style="color: #EF4444; margin-bottom: 15px;">🕸️ Bayesian Network</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Convert decision tree to probabilistic graphical model.</p>
+
+                        <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px; font-size: 13px; line-height: 1.8;">
+                            <strong>Features:</strong><br>
+                            • Conditional probability tables (CPT)<br>
+                            • Belief propagation inference<br>
+                            • Prior and posterior updates<br>
+                            • Joint probability calculations
+                        </div>
+
+                        <button onclick="buildBayesianNetwork()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #EF4444, #DC2626); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; margin-bottom: 10px;">
+                            Build Bayesian Network
+                        </button>
+
+                        <button onclick="showBayesianInference()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #EC4899, #BE185D); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                            Run Inference
+                        </button>
+
+                        <div id="bayesian-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                    </div>
+                </div>
+
+                <div style="padding: 25px; border: 3px solid #8B5CF6; border-radius: 15px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(236, 72, 153, 0.05)); margin-bottom: 30px;">
+                    <h3 style="color: #8B5CF6; margin-bottom: 15px;">📈 Path Probability Analysis</h3>
+                    <p style="color: #666; margin-bottom: 20px;">Calculate the probability of each decision path through the tree.</p>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                        <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #ddd; text-align: center;">
+                            <div style="font-size: 24px; font-weight: bold; color: #8B5CF6;">P(path)</div>
+                            <div style="font-size: 12px; color: #666; margin-top: 5px;">Joint probability of decision sequence</div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #ddd; text-align: center;">
+                            <div style="font-size: 24px; font-weight: bold; color: #EC4899;">P(A|B)</div>
+                            <div style="font-size: 12px; color: #666; margin-top: 5px;">Conditional probabilities</div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #ddd; text-align: center;">
+                            <div style="font-size: 24px; font-weight: bold; color: #F59E0B;">H(X)</div>
+                            <div style="font-size: 12px; color: #666; margin-top: 5px;">Information entropy</div>
+                        </div>
+                    </div>
+
+                    <button onclick="analyzePathProbabilities()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                        Analyze All Paths
+                    </button>
+
+                    <div id="path-prob-result" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                </div>
+
+                <div style="margin-top: 20px; text-align: center;">
+                    <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                        Close
+                    </button>
+                </div>
+            `;
+
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+        }
+
+        function testProbabilisticOperations() {
+            const p1 = 0.7;
+            const p2 = 0.6;
+
+            const tnormMethod = document.getElementById('prob-tnorm').value;
+            const tconormMethod = document.getElementById('prob-tconorm').value;
+
+            const andResult = ProbabilisticNode.probabilisticAND(p1, p2, tnormMethod);
+            const orResult = ProbabilisticNode.probabilisticOR(p1, p2, tconormMethod);
+            const notResult = ProbabilisticNode.probabilisticNOT(p1);
+
+            const resultDiv = document.getElementById('prob-ops-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div style="font-family: monospace;">
+                    <strong>Test with P(A) = 0.7, P(B) = 0.6:</strong><br><br>
+                    P(A AND B) = ${andResult.toFixed(4)} (${tnormMethod})<br>
+                    P(A OR B) = ${orResult.toFixed(4)} (${tconormMethod})<br>
+                    P(NOT A) = ${notResult.toFixed(4)}<br>
+                </div>
+            `;
+        }
+
+        function buildBayesianNetwork() {
+            const tree = treeBuilder.buildTreeFromLayers();
+            if (!tree) {
+                alert('Please build a decision tree first.');
+                return;
+            }
+
+            bayesianNetwork = new BayesianNetwork();
+            bayesianNetwork.buildFromTree(tree);
+
+            mlModelType = 'probabilistic';
+
+            const statusDiv = document.getElementById('bayesian-status');
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = `
+                <div style="color: #10B981;">
+                    <strong>✓ Bayesian Network Built!</strong><br>
+                    Nodes: ${bayesianNetwork.nodes.size}<br>
+                    Edges: ${bayesianNetwork.edges.length}<br>
+                    <small>Ready for probabilistic inference</small>
+                </div>
+            `;
+        }
+
+        function showBayesianInference() {
+            if (!bayesianNetwork || bayesianNetwork.nodes.size === 0) {
+                alert('Please build a Bayesian network first.');
+                return;
+            }
+
+            alert('Bayesian inference system is ready. Conditional probabilities will be used for all predictions.');
+        }
+
+        function analyzePathProbabilities() {
+            const tree = treeBuilder.buildTreeFromLayers();
+            if (!tree) {
+                alert('Please build a decision tree first.');
+                return;
+            }
+
+            // Simplified path probability calculation
+            const paths = [];
+            function traversePaths(node, currentPath, currentProb) {
+                if (!node) return;
+
+                const newPath = [...currentPath, node.question];
+
+                if (!node.left && !node.right) {
+                    paths.push({
+                        path: newPath,
+                        probability: currentProb,
+                        score: node.score
+                    });
+                    return;
+                }
+
+                if (node.left) {
+                    traversePaths(node.left, newPath, currentProb * 0.5);
+                }
+                if (node.right) {
+                    traversePaths(node.right, newPath, currentProb * 0.5);
+                }
+            }
+
+            traversePaths(tree, [], 1.0);
+
+            paths.sort((a, b) => b.probability - a.probability);
+
+            let html = '<div style="max-height: 200px; overflow-y: auto;">';
+            paths.slice(0, 5).forEach((pathObj, idx) => {
+                html += `
+                    <div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 8px; border: 1px solid #ddd;">
+                        <strong>Path ${idx + 1}:</strong> P = ${pathObj.probability.toFixed(4)}<br>
+                        <small style="color: #666;">${pathObj.path.slice(0, 3).join(' → ')}${pathObj.path.length > 3 ? '...' : ''}</small><br>
+                        <small>Final Score: ${pathObj.score.toFixed(2)}</small>
+                    </div>
+                `;
+            });
+            html += '</div>';
+
+            const resultDiv = document.getElementById('path-prob-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = html;
+        }
     </script>
 </body>
 </html>
