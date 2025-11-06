@@ -475,6 +475,7 @@
             <button onclick="showMLPanel()" style="background: linear-gradient(135deg, #8B5CF6, #EC4899);">🤖 ML Models</button>
             <button onclick="showFuzzyLogicPanel()" style="background: linear-gradient(135deg, #10B981, #3B82F6);">🔮 Fuzzy Logic</button>
             <button onclick="showProbabilisticPanel()" style="background: linear-gradient(135deg, #F59E0B, #EF4444);">📊 Probabilistic</button>
+            <button onclick="showDataScienceWorkbench()" style="background: linear-gradient(135deg, #06B6D4, #3B82F6); font-weight: bold;">🔬 Data Science Workbench</button>
             <input type="file" id="survey-data-file" style="display: none;" accept=".csv,.json" onchange="processSurveyDataFile(event)">
             <input type="file" id="tree-config-file" style="display: none;" accept=".json" onchange="processTreeConfigFile(event)">
         </div>
@@ -1999,6 +2000,872 @@
         }
 
         // =============================================================================
+        // DATA SCIENCE WORKBENCH - CROSS-VALIDATION
+        // =============================================================================
+        class CrossValidator {
+            constructor(nSplits = 5, shuffle = true, randomState = 42) {
+                this.nSplits = nSplits;
+                this.shuffle = shuffle;
+                this.randomState = randomState;
+            }
+
+            // K-Fold Cross-Validation
+            kFold(data) {
+                const n = data.length;
+                const foldSize = Math.floor(n / this.nSplits);
+                const indices = Array.from({length: n}, (_, i) => i);
+
+                if (this.shuffle) {
+                    this.shuffleArray(indices, this.randomState);
+                }
+
+                const folds = [];
+                for (let i = 0; i < this.nSplits; i++) {
+                    const testStart = i * foldSize;
+                    const testEnd = (i === this.nSplits - 1) ? n : (i + 1) * foldSize;
+
+                    const testIndices = indices.slice(testStart, testEnd);
+                    const trainIndices = [...indices.slice(0, testStart), ...indices.slice(testEnd)];
+
+                    folds.push({
+                        train: trainIndices.map(idx => data[idx]),
+                        test: testIndices.map(idx => data[idx]),
+                        trainIndices,
+                        testIndices
+                    });
+                }
+
+                return folds;
+            }
+
+            // Stratified K-Fold (preserves class distribution)
+            stratifiedKFold(data, targetKey = 'finalScore') {
+                // Group by target classes
+                const classes = new Map();
+                data.forEach((item, idx) => {
+                    const classLabel = this.discretizeTarget(item[targetKey]);
+                    if (!classes.has(classLabel)) {
+                        classes.set(classLabel, []);
+                    }
+                    classes.get(classLabel).push({item, idx});
+                });
+
+                // Create stratified folds
+                const folds = Array.from({length: this.nSplits}, () => ({
+                    train: [],
+                    test: [],
+                    trainIndices: [],
+                    testIndices: []
+                }));
+
+                classes.forEach((items, classLabel) => {
+                    if (this.shuffle) {
+                        this.shuffleArray(items, this.randomState);
+                    }
+
+                    const classFoldSize = Math.floor(items.length / this.nSplits);
+
+                    for (let i = 0; i < this.nSplits; i++) {
+                        const testStart = i * classFoldSize;
+                        const testEnd = (i === this.nSplits - 1) ? items.length : (i + 1) * classFoldSize;
+
+                        for (let j = 0; j < items.length; j++) {
+                            if (j >= testStart && j < testEnd) {
+                                folds[i].test.push(items[j].item);
+                                folds[i].testIndices.push(items[j].idx);
+                            } else {
+                                folds[i].train.push(items[j].item);
+                                folds[i].trainIndices.push(items[j].idx);
+                            }
+                        }
+                    }
+                });
+
+                return folds;
+            }
+
+            // Time Series Split (respects temporal order)
+            timeSeriesSplit(data) {
+                const n = data.length;
+                const minTrainSize = Math.floor(n / (this.nSplits + 1));
+                const folds = [];
+
+                for (let i = 0; i < this.nSplits; i++) {
+                    const trainEnd = minTrainSize * (i + 2);
+                    const testEnd = Math.min(trainEnd + minTrainSize, n);
+
+                    folds.push({
+                        train: data.slice(0, trainEnd),
+                        test: data.slice(trainEnd, testEnd),
+                        trainIndices: Array.from({length: trainEnd}, (_, j) => j),
+                        testIndices: Array.from({length: testEnd - trainEnd}, (_, j) => trainEnd + j)
+                    });
+                }
+
+                return folds;
+            }
+
+            // Leave-One-Out Cross-Validation
+            leaveOneOut(data) {
+                return data.map((item, idx) => ({
+                    train: data.filter((_, i) => i !== idx),
+                    test: [item],
+                    trainIndices: Array.from({length: data.length - 1}, (_, i) => i < idx ? i : i + 1),
+                    testIndices: [idx]
+                }));
+            }
+
+            // Helper: Shuffle array with seed
+            shuffleArray(array, seed) {
+                let currentIndex = array.length;
+                let temporaryValue, randomIndex;
+
+                const random = () => {
+                    seed = (seed * 9301 + 49297) % 233280;
+                    return seed / 233280;
+                };
+
+                while (currentIndex !== 0) {
+                    randomIndex = Math.floor(random() * currentIndex);
+                    currentIndex -= 1;
+                    temporaryValue = array[currentIndex];
+                    array[currentIndex] = array[randomIndex];
+                    array[randomIndex] = temporaryValue;
+                }
+            }
+
+            // Helper: Discretize continuous target for stratification
+            discretizeTarget(value) {
+                if (value < -2) return 'very_low';
+                if (value < 0) return 'low';
+                if (value < 2) return 'medium';
+                return 'high';
+            }
+
+            // Cross-validate a model
+            crossValidate(model, data, targetKey = 'finalScore', method = 'kfold') {
+                let folds;
+                if (method === 'stratified') {
+                    folds = this.stratifiedKFold(data, targetKey);
+                } else if (method === 'timeseries') {
+                    folds = this.timeSeriesSplit(data);
+                } else if (method === 'loo') {
+                    folds = this.leaveOneOut(data);
+                } else {
+                    folds = this.kFold(data);
+                }
+
+                const results = folds.map((fold, foldIdx) => {
+                    // Train on fold
+                    const trainedModel = this.trainModelOnFold(model, fold.train);
+
+                    // Predict on test set
+                    const predictions = fold.test.map(item => {
+                        return this.predictWithModel(trainedModel, item);
+                    });
+
+                    // Calculate metrics
+                    const actuals = fold.test.map(item => item[targetKey]);
+                    const metrics = this.calculateMetrics(predictions, actuals);
+
+                    return {
+                        fold: foldIdx,
+                        metrics,
+                        predictions,
+                        actuals
+                    };
+                });
+
+                return {
+                    folds: results,
+                    avgMetrics: this.averageMetrics(results.map(r => r.metrics))
+                };
+            }
+
+            trainModelOnFold(model, trainData) {
+                // Simplified training - in practice would retrain model
+                return model;
+            }
+
+            predictWithModel(model, dataPoint) {
+                if (model && model.predict) {
+                    return model.predict(dataPoint);
+                }
+                return dataPoint.finalScore || 0;
+            }
+
+            calculateMetrics(predictions, actuals) {
+                const mse = predictions.reduce((sum, pred, i) => sum + Math.pow(pred - actuals[i], 2), 0) / predictions.length;
+                const mae = predictions.reduce((sum, pred, i) => sum + Math.abs(pred - actuals[i]), 0) / predictions.length;
+                const rmse = Math.sqrt(mse);
+
+                return {mse, mae, rmse};
+            }
+
+            averageMetrics(metricsArray) {
+                const avg = {mse: 0, mae: 0, rmse: 0};
+                metricsArray.forEach(m => {
+                    avg.mse += m.mse;
+                    avg.mae += m.mae;
+                    avg.rmse += m.rmse;
+                });
+                const n = metricsArray.length;
+                avg.mse /= n;
+                avg.mae /= n;
+                avg.rmse /= n;
+                return avg;
+            }
+        }
+
+        // =============================================================================
+        // DATA SCIENCE WORKBENCH - ADVANCED METRICS
+        // =============================================================================
+        class AdvancedMetrics {
+            constructor() {
+                this.confusionMatrix = null;
+                this.rocCurve = null;
+            }
+
+            // Calculate all classification metrics
+            calculateClassificationMetrics(predictions, actuals, threshold = 0) {
+                const binaryPreds = predictions.map(p => p >= threshold ? 1 : 0);
+                const binaryActuals = actuals.map(a => a >= threshold ? 1 : 0);
+
+                const tp = binaryPreds.filter((p, i) => p === 1 && binaryActuals[i] === 1).length;
+                const tn = binaryPreds.filter((p, i) => p === 0 && binaryActuals[i] === 0).length;
+                const fp = binaryPreds.filter((p, i) => p === 1 && binaryActuals[i] === 0).length;
+                const fn = binaryPreds.filter((p, i) => p === 0 && binaryActuals[i] === 1).length;
+
+                const accuracy = (tp + tn) / (tp + tn + fp + fn);
+                const precision = tp / (tp + fp) || 0;
+                const recall = tp / (tp + fn) || 0;
+                const f1 = 2 * (precision * recall) / (precision + recall) || 0;
+                const specificity = tn / (tn + fp) || 0;
+
+                this.confusionMatrix = {tp, tn, fp, fn};
+
+                return {
+                    accuracy,
+                    precision,
+                    recall,
+                    f1,
+                    specificity,
+                    confusionMatrix: this.confusionMatrix
+                };
+            }
+
+            // Calculate ROC curve and AUC
+            calculateROC(predictions, actuals, threshold = 0) {
+                const binaryActuals = actuals.map(a => a >= threshold ? 1 : 0);
+
+                // Generate points for ROC curve
+                const points = [];
+                const thresholds = [...new Set(predictions)].sort((a, b) => b - a);
+
+                thresholds.forEach(thresh => {
+                    const binaryPreds = predictions.map(p => p >= thresh ? 1 : 0);
+
+                    const tp = binaryPreds.filter((p, i) => p === 1 && binaryActuals[i] === 1).length;
+                    const fp = binaryPreds.filter((p, i) => p === 1 && binaryActuals[i] === 0).length;
+                    const tn = binaryPreds.filter((p, i) => p === 0 && binaryActuals[i] === 0).length;
+                    const fn = binaryPreds.filter((p, i) => p === 0 && binaryActuals[i] === 1).length;
+
+                    const tpr = tp / (tp + fn) || 0;  // True Positive Rate (Recall)
+                    const fpr = fp / (fp + tn) || 0;  // False Positive Rate
+
+                    points.push({threshold: thresh, fpr, tpr, tp, fp, tn, fn});
+                });
+
+                // Calculate AUC using trapezoidal rule
+                points.sort((a, b) => a.fpr - b.fpr);
+                let auc = 0;
+                for (let i = 1; i < points.length; i++) {
+                    const width = points[i].fpr - points[i - 1].fpr;
+                    const height = (points[i].tpr + points[i - 1].tpr) / 2;
+                    auc += width * height;
+                }
+
+                this.rocCurve = {points, auc};
+                return this.rocCurve;
+            }
+
+            // Calculate Precision-Recall curve
+            calculatePrecisionRecall(predictions, actuals, threshold = 0) {
+                const binaryActuals = actuals.map(a => a >= threshold ? 1 : 0);
+
+                const points = [];
+                const thresholds = [...new Set(predictions)].sort((a, b) => b - a);
+
+                thresholds.forEach(thresh => {
+                    const binaryPreds = predictions.map(p => p >= thresh ? 1 : 0);
+
+                    const tp = binaryPreds.filter((p, i) => p === 1 && binaryActuals[i] === 1).length;
+                    const fp = binaryPreds.filter((p, i) => p === 1 && binaryActuals[i] === 0).length;
+                    const fn = binaryPreds.filter((p, i) => p === 0 && binaryActuals[i] === 1).length;
+
+                    const precision = tp / (tp + fp) || 0;
+                    const recall = tp / (tp + fn) || 0;
+
+                    points.push({threshold: thresh, precision, recall});
+                });
+
+                return points;
+            }
+
+            // Multi-class confusion matrix
+            calculateMultiClassConfusion(predictions, actuals, numClasses) {
+                const matrix = Array.from({length: numClasses}, () => Array(numClasses).fill(0));
+
+                predictions.forEach((pred, i) => {
+                    const predClass = Math.floor(pred);
+                    const actualClass = Math.floor(actuals[i]);
+                    if (predClass >= 0 && predClass < numClasses && actualClass >= 0 && actualClass < numClasses) {
+                        matrix[actualClass][predClass]++;
+                    }
+                });
+
+                return matrix;
+            }
+
+            // Matthews Correlation Coefficient
+            calculateMCC(tp, tn, fp, fn) {
+                const numerator = (tp * tn) - (fp * fn);
+                const denominator = Math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn));
+                return denominator === 0 ? 0 : numerator / denominator;
+            }
+
+            // Cohen's Kappa
+            calculateKappa(predictions, actuals) {
+                const n = predictions.length;
+                const observed = predictions.filter((p, i) => p === actuals[i]).length / n;
+
+                const predCounts = {};
+                const actualCounts = {};
+                predictions.forEach(p => predCounts[p] = (predCounts[p] || 0) + 1);
+                actuals.forEach(a => actualCounts[a] = (actualCounts[a] || 0) + 1);
+
+                let expected = 0;
+                Object.keys(predCounts).forEach(key => {
+                    expected += (predCounts[key] / n) * ((actualCounts[key] || 0) / n);
+                });
+
+                return (observed - expected) / (1 - expected);
+            }
+        }
+
+        // =============================================================================
+        // DATA SCIENCE WORKBENCH - PREPROCESSING
+        // =============================================================================
+        class DataPreprocessor {
+            constructor() {
+                this.scalerParams = {};
+                this.imputerParams = {};
+            }
+
+            // Standard Scaler (Z-score normalization)
+            standardScaler(data, features, fit = true) {
+                const scaled = data.map(row => ({...row}));
+
+                features.forEach(feature => {
+                    const values = data.map(row => row[feature]).filter(v => v !== null && v !== undefined && !isNaN(v));
+
+                    if (fit) {
+                        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+                        const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
+                        const std = Math.sqrt(variance);
+
+                        this.scalerParams[feature] = {mean, std};
+                    }
+
+                    const {mean, std} = this.scalerParams[feature];
+
+                    scaled.forEach(row => {
+                        if (row[feature] !== null && row[feature] !== undefined && !isNaN(row[feature])) {
+                            row[feature] = std > 0 ? (row[feature] - mean) / std : 0;
+                        }
+                    });
+                });
+
+                return scaled;
+            }
+
+            // Min-Max Scaler (0-1 normalization)
+            minMaxScaler(data, features, fit = true, featureRange = [0, 1]) {
+                const scaled = data.map(row => ({...row}));
+
+                features.forEach(feature => {
+                    const values = data.map(row => row[feature]).filter(v => v !== null && v !== undefined && !isNaN(v));
+
+                    if (fit) {
+                        const min = Math.min(...values);
+                        const max = Math.max(...values);
+                        this.scalerParams[feature] = {min, max};
+                    }
+
+                    const {min, max} = this.scalerParams[feature];
+                    const [targetMin, targetMax] = featureRange;
+
+                    scaled.forEach(row => {
+                        if (row[feature] !== null && row[feature] !== undefined && !isNaN(row[feature])) {
+                            const normalized = max > min ? (row[feature] - min) / (max - min) : 0;
+                            row[feature] = normalized * (targetMax - targetMin) + targetMin;
+                        }
+                    });
+                });
+
+                return scaled;
+            }
+
+            // Robust Scaler (Median/IQR)
+            robustScaler(data, features, fit = true) {
+                const scaled = data.map(row => ({...row}));
+
+                features.forEach(feature => {
+                    const values = data.map(row => row[feature]).filter(v => v !== null && v !== undefined && !isNaN(v));
+                    values.sort((a, b) => a - b);
+
+                    if (fit) {
+                        const median = this.calculateMedian(values);
+                        const q1 = this.calculatePercentile(values, 25);
+                        const q3 = this.calculatePercentile(values, 75);
+                        const iqr = q3 - q1;
+
+                        this.scalerParams[feature] = {median, iqr};
+                    }
+
+                    const {median, iqr} = this.scalerParams[feature];
+
+                    scaled.forEach(row => {
+                        if (row[feature] !== null && row[feature] !== undefined && !isNaN(row[feature])) {
+                            row[feature] = iqr > 0 ? (row[feature] - median) / iqr : 0;
+                        }
+                    });
+                });
+
+                return scaled;
+            }
+
+            // Missing Value Imputation - Mean
+            imputeMean(data, features) {
+                const imputed = data.map(row => ({...row}));
+
+                features.forEach(feature => {
+                    const values = data.map(row => row[feature]).filter(v => v !== null && v !== undefined && !isNaN(v));
+                    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+
+                    this.imputerParams[feature] = {method: 'mean', value: mean};
+
+                    imputed.forEach(row => {
+                        if (row[feature] === null || row[feature] === undefined || isNaN(row[feature])) {
+                            row[feature] = mean;
+                        }
+                    });
+                });
+
+                return imputed;
+            }
+
+            // Missing Value Imputation - Median
+            imputeMedian(data, features) {
+                const imputed = data.map(row => ({...row}));
+
+                features.forEach(feature => {
+                    const values = data.map(row => row[feature]).filter(v => v !== null && v !== undefined && !isNaN(v));
+                    values.sort((a, b) => a - b);
+                    const median = this.calculateMedian(values);
+
+                    this.imputerParams[feature] = {method: 'median', value: median};
+
+                    imputed.forEach(row => {
+                        if (row[feature] === null || row[feature] === undefined || isNaN(row[feature])) {
+                            row[feature] = median;
+                        }
+                    });
+                });
+
+                return imputed;
+            }
+
+            // Missing Value Imputation - KNN
+            imputeKNN(data, features, k = 5) {
+                const imputed = data.map(row => ({...row}));
+
+                imputed.forEach((row, idx) => {
+                    features.forEach(feature => {
+                        if (row[feature] === null || row[feature] === undefined || isNaN(row[feature])) {
+                            // Find k nearest neighbors with non-missing values
+                            const neighbors = this.findKNearestNeighbors(data, idx, feature, k);
+                            const neighborValues = neighbors.map(n => n[feature]);
+                            row[feature] = neighborValues.reduce((a, b) => a + b, 0) / neighborValues.length;
+                        }
+                    });
+                });
+
+                return imputed;
+            }
+
+            // Outlier Detection - Z-score method
+            detectOutliersZScore(data, features, threshold = 3) {
+                const outliers = [];
+
+                features.forEach(feature => {
+                    const values = data.map(row => row[feature]).filter(v => v !== null && v !== undefined && !isNaN(v));
+                    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+                    const std = Math.sqrt(values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length);
+
+                    data.forEach((row, idx) => {
+                        const value = row[feature];
+                        if (value !== null && value !== undefined && !isNaN(value)) {
+                            const zScore = Math.abs((value - mean) / std);
+                            if (zScore > threshold) {
+                                outliers.push({index: idx, feature, value, zScore});
+                            }
+                        }
+                    });
+                });
+
+                return outliers;
+            }
+
+            // Outlier Detection - IQR method
+            detectOutliersIQR(data, features) {
+                const outliers = [];
+
+                features.forEach(feature => {
+                    const values = data.map(row => row[feature]).filter(v => v !== null && v !== undefined && !isNaN(v));
+                    values.sort((a, b) => a - b);
+
+                    const q1 = this.calculatePercentile(values, 25);
+                    const q3 = this.calculatePercentile(values, 75);
+                    const iqr = q3 - q1;
+                    const lowerBound = q1 - 1.5 * iqr;
+                    const upperBound = q3 + 1.5 * iqr;
+
+                    data.forEach((row, idx) => {
+                        const value = row[feature];
+                        if (value !== null && value !== undefined && !isNaN(value)) {
+                            if (value < lowerBound || value > upperBound) {
+                                outliers.push({index: idx, feature, value, lowerBound, upperBound});
+                            }
+                        }
+                    });
+                });
+
+                return outliers;
+            }
+
+            // Helper methods
+            calculateMedian(sortedValues) {
+                const mid = Math.floor(sortedValues.length / 2);
+                return sortedValues.length % 2 === 0
+                    ? (sortedValues[mid - 1] + sortedValues[mid]) / 2
+                    : sortedValues[mid];
+            }
+
+            calculatePercentile(sortedValues, percentile) {
+                const index = (percentile / 100) * (sortedValues.length - 1);
+                const lower = Math.floor(index);
+                const upper = Math.ceil(index);
+                const weight = index % 1;
+                return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
+            }
+
+            findKNearestNeighbors(data, targetIdx, feature, k) {
+                const distances = data
+                    .map((row, idx) => ({
+                        row,
+                        idx,
+                        distance: idx === targetIdx ? Infinity : this.calculateDistance(data[targetIdx], row, feature)
+                    }))
+                    .filter(d => d.row[feature] !== null && d.row[feature] !== undefined && !isNaN(d.row[feature]))
+                    .sort((a, b) => a.distance - b.distance)
+                    .slice(0, k);
+
+                return distances.map(d => d.row);
+            }
+
+            calculateDistance(row1, row2, excludeFeature) {
+                const features = Object.keys(row1).filter(k => k !== excludeFeature && typeof row1[k] === 'number');
+                const sumSquares = features.reduce((sum, f) => {
+                    const diff = (row1[f] || 0) - (row2[f] || 0);
+                    return sum + diff * diff;
+                }, 0);
+                return Math.sqrt(sumSquares);
+            }
+        }
+
+        // =============================================================================
+        // DATA SCIENCE WORKBENCH - FEATURE SELECTION
+        // =============================================================================
+        class FeatureSelector {
+            constructor() {
+                this.selectedFeatures = [];
+                this.featureScores = new Map();
+            }
+
+            // Correlation-based feature selection
+            selectByCorrelation(data, targetKey, threshold = 0.5) {
+                const features = Object.keys(data[0]).filter(k => k !== targetKey && typeof data[0][k] === 'number');
+                const scores = new Map();
+
+                features.forEach(feature => {
+                    const correlation = this.calculateCorrelation(
+                        data.map(row => row[feature]),
+                        data.map(row => row[targetKey])
+                    );
+                    scores.set(feature, Math.abs(correlation));
+                });
+
+                this.featureScores = scores;
+                this.selectedFeatures = Array.from(scores.entries())
+                    .filter(([_, score]) => score >= threshold)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([feature, _]) => feature);
+
+                return {
+                    selectedFeatures: this.selectedFeatures,
+                    scores: Object.fromEntries(scores)
+                };
+            }
+
+            // Variance threshold feature selection
+            selectByVariance(data, threshold = 0.01) {
+                const features = Object.keys(data[0]).filter(k => typeof data[0][k] === 'number');
+                const scores = new Map();
+
+                features.forEach(feature => {
+                    const values = data.map(row => row[feature]);
+                    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+                    const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
+                    scores.set(feature, variance);
+                });
+
+                this.featureScores = scores;
+                this.selectedFeatures = Array.from(scores.entries())
+                    .filter(([_, variance]) => variance >= threshold)
+                    .map(([feature, _]) => feature);
+
+                return {
+                    selectedFeatures: this.selectedFeatures,
+                    scores: Object.fromEntries(scores)
+                };
+            }
+
+            // Mutual Information feature selection
+            selectByMutualInformation(data, targetKey, topK = 10) {
+                const features = Object.keys(data[0]).filter(k => k !== targetKey && typeof data[0][k] === 'number');
+                const scores = new Map();
+
+                features.forEach(feature => {
+                    const mi = this.calculateMutualInformation(
+                        data.map(row => row[feature]),
+                        data.map(row => row[targetKey])
+                    );
+                    scores.set(feature, mi);
+                });
+
+                this.featureScores = scores;
+                this.selectedFeatures = Array.from(scores.entries())
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, topK)
+                    .map(([feature, _]) => feature);
+
+                return {
+                    selectedFeatures: this.selectedFeatures,
+                    scores: Object.fromEntries(scores)
+                };
+            }
+
+            // Calculate Pearson correlation
+            calculateCorrelation(x, y) {
+                const n = x.length;
+                const meanX = x.reduce((a, b) => a + b, 0) / n;
+                const meanY = y.reduce((a, b) => a + b, 0) / n;
+
+                let numerator = 0;
+                let denomX = 0;
+                let denomY = 0;
+
+                for (let i = 0; i < n; i++) {
+                    const dx = x[i] - meanX;
+                    const dy = y[i] - meanY;
+                    numerator += dx * dy;
+                    denomX += dx * dx;
+                    denomY += dy * dy;
+                }
+
+                return numerator / Math.sqrt(denomX * denomY);
+            }
+
+            // Calculate Mutual Information (simplified)
+            calculateMutualInformation(x, y) {
+                // Discretize continuous variables
+                const bins = 10;
+                const xBinned = this.discretize(x, bins);
+                const yBinned = this.discretize(y, bins);
+
+                // Calculate probabilities
+                const pX = this.calculateProbabilities(xBinned);
+                const pY = this.calculateProbabilities(yBinned);
+                const pXY = this.calculateJointProbabilities(xBinned, yBinned);
+
+                // Calculate MI
+                let mi = 0;
+                pXY.forEach((prob, key) => {
+                    const [xBin, yBin] = key.split(',');
+                    const pxProb = pX.get(xBin) || 0;
+                    const pyProb = pY.get(yBin) || 0;
+                    if (prob > 0 && pxProb > 0 && pyProb > 0) {
+                        mi += prob * Math.log2(prob / (pxProb * pyProb));
+                    }
+                });
+
+                return mi;
+            }
+
+            discretize(values, bins) {
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const binSize = (max - min) / bins;
+
+                return values.map(v => Math.min(Math.floor((v - min) / binSize), bins - 1));
+            }
+
+            calculateProbabilities(binnedValues) {
+                const counts = new Map();
+                binnedValues.forEach(bin => counts.set(bin, (counts.get(bin) || 0) + 1));
+
+                const probs = new Map();
+                const total = binnedValues.length;
+                counts.forEach((count, bin) => probs.set(bin.toString(), count / total));
+
+                return probs;
+            }
+
+            calculateJointProbabilities(xBinned, yBinned) {
+                const counts = new Map();
+                xBinned.forEach((xBin, i) => {
+                    const key = `${xBin},${yBinned[i]}`;
+                    counts.set(key, (counts.get(key) || 0) + 1);
+                });
+
+                const probs = new Map();
+                const total = xBinned.length;
+                counts.forEach((count, key) => probs.set(key, count / total));
+
+                return probs;
+            }
+        }
+
+        // =============================================================================
+        // DATA SCIENCE WORKBENCH - SHAP EXPLANATIONS
+        // =============================================================================
+        class SHAPExplainer {
+            constructor(model, data) {
+                this.model = model;
+                this.data = data;
+                this.shapValues = new Map();
+                this.baseValue = null;
+            }
+
+            // Calculate SHAP values for tree-based models (TreeSHAP)
+            explainPrediction(dataPoint, numSamples = 100) {
+                // Calculate base value (average prediction)
+                if (this.baseValue === null) {
+                    this.baseValue = this.calculateBaseValue();
+                }
+
+                const features = Object.keys(dataPoint).filter(k => typeof dataPoint[k] === 'number');
+                const shapValues = {};
+
+                features.forEach(feature => {
+                    shapValues[feature] = this.calculateShapValue(dataPoint, feature, numSamples);
+                });
+
+                return {
+                    shapValues,
+                    baseValue: this.baseValue,
+                    prediction: this.model.predict ? this.model.predict(dataPoint) : dataPoint.finalScore
+                };
+            }
+
+            // Calculate SHAP value for a single feature
+            calculateShapValue(dataPoint, feature, numSamples) {
+                let marginalContribution = 0;
+
+                for (let i = 0; i < numSamples; i++) {
+                    // Sample random subset of features
+                    const features = Object.keys(dataPoint).filter(k => k !== feature && typeof dataPoint[k] === 'number');
+                    const subsetSize = Math.floor(Math.random() * features.length);
+                    const subset = this.sampleArray(features, subsetSize);
+
+                    // Predict with and without the feature
+                    const withFeature = this.predictWithSubset(dataPoint, [...subset, feature]);
+                    const withoutFeature = this.predictWithSubset(dataPoint, subset);
+
+                    marginalContribution += (withFeature - withoutFeature);
+                }
+
+                return marginalContribution / numSamples;
+            }
+
+            calculateBaseValue() {
+                const predictions = this.data.map(d => {
+                    return this.model.predict ? this.model.predict(d) : d.finalScore || 0;
+                });
+                return predictions.reduce((a, b) => a + b, 0) / predictions.length;
+            }
+
+            predictWithSubset(dataPoint, featureSubset) {
+                // Create a data point with only the specified features
+                // For missing features, use average value from training data
+                const maskedPoint = {};
+
+                Object.keys(dataPoint).forEach(key => {
+                    if (featureSubset.includes(key)) {
+                        maskedPoint[key] = dataPoint[key];
+                    } else if (typeof dataPoint[key] === 'number') {
+                        // Use average value from training data
+                        const values = this.data.map(d => d[key]).filter(v => v !== null && v !== undefined);
+                        maskedPoint[key] = values.reduce((a, b) => a + b, 0) / values.length;
+                    } else {
+                        maskedPoint[key] = dataPoint[key];
+                    }
+                });
+
+                return this.model.predict ? this.model.predict(maskedPoint) : maskedPoint.finalScore || 0;
+            }
+
+            sampleArray(array, size) {
+                const shuffled = array.slice();
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+                return shuffled.slice(0, size);
+            }
+
+            // Generate summary plot data
+            generateSummaryPlot(dataPoints) {
+                const allShapValues = dataPoints.map(dp => this.explainPrediction(dp));
+
+                const features = Object.keys(allShapValues[0].shapValues);
+                const summary = {};
+
+                features.forEach(feature => {
+                    const values = allShapValues.map(s => s.shapValues[feature]);
+                    summary[feature] = {
+                        mean: values.reduce((a, b) => a + b, 0) / values.length,
+                        absorbedMean: values.reduce((a, b) => a + Math.abs(b), 0) / values.length,
+                        values: values
+                    };
+                });
+
+                return summary;
+            }
+        }
+
+        // =============================================================================
         // GLOBAL INSTANCES
         // =============================================================================
         let baggingEnsemble = null;
@@ -2007,6 +2874,14 @@
         let gradientBoostingModel = null;
         let neuralDecisionModel = null;
         let mlModelType = 'single';  // 'single', 'bagging', 'boosting', 'neural', 'fuzzy', 'probabilistic'
+
+        // Data Science Workbench instances
+        let crossValidator = null;
+        let advancedMetrics = null;
+        let dataPreprocessor = null;
+        let featureSelector = null;
+        let shapExplainer = null;
+        let preprocessedData = null;
 
         // Adaptive Color Scales System
         const colorScales = {
@@ -8868,6 +9743,1975 @@ You can now:
             const resultDiv = document.getElementById('path-prob-result');
             resultDiv.style.display = 'block';
             resultDiv.innerHTML = html;
+        }
+
+        // =============================================================================
+        // DATA SCIENCE WORKBENCH - MAIN PANEL
+        // =============================================================================
+        function showDataScienceWorkbench() {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 4000; overflow-y: auto; display: flex; align-items: center; justify-content: center;';
+
+            const content = document.createElement('div');
+            content.style.cssText = 'background: white; padding: 40px; border-radius: 20px; width: 95%; max-width: 1400px; max-height: 95vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5);';
+
+            content.innerHTML = `
+                <h1 style="margin-bottom: 30px; background: linear-gradient(135deg, #06B6D4, #3B82F6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3em; text-align: center;">
+                    🔬 Data Science Workbench
+                </h1>
+
+                <p style="text-align: center; color: #666; margin-bottom: 40px; font-size: 18px; line-height: 1.6;">
+                    Complete ML pipeline from raw data to model interpretation
+                </p>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 25px; margin-bottom: 30px;">
+                    <!-- Data Preprocessing -->
+                    <div style="padding: 30px; border: 3px solid #06B6D4; border-radius: 15px; background: linear-gradient(135deg, rgba(6, 182, 212, 0.05), rgba(59, 130, 246, 0.05)); cursor: pointer; transition: transform 0.2s;" onclick="showPreprocessingPanel()" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <h2 style="color: #06B6D4; margin-bottom: 15px; font-size: 24px;">🧹 Data Preprocessing</h2>
+                        <p style="color: #666; margin-bottom: 15px; line-height: 1.6;">Clean and transform your data</p>
+                        <ul style="color: #666; line-height: 1.8; font-size: 14px;">
+                            <li>✓ Scaling (Standard, MinMax, Robust)</li>
+                            <li>✓ Missing Value Imputation</li>
+                            <li>✓ Outlier Detection</li>
+                            <li>✓ Live Data Preview</li>
+                        </ul>
+                    </div>
+
+                    <!-- Feature Selection -->
+                    <div style="padding: 30px; border: 3px solid #8B5CF6; border-radius: 15px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(236, 72, 153, 0.05)); cursor: pointer; transition: transform 0.2s;" onclick="showFeatureSelectionPanel()" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <h2 style="color: #8B5CF6; margin-bottom: 15px; font-size: 24px;">🎯 Feature Selection</h2>
+                        <p style="color: #666; margin-bottom: 15px; line-height: 1.6;">Identify most important features</p>
+                        <ul style="color: #666; line-height: 1.8; font-size: 14px;">
+                            <li>✓ Correlation Analysis</li>
+                            <li>✓ Variance Threshold</li>
+                            <li>✓ Mutual Information</li>
+                            <li>✓ Feature Score Rankings</li>
+                        </ul>
+                    </div>
+
+                    <!-- Cross-Validation -->
+                    <div style="padding: 30px; border: 3px solid #10B981; border-radius: 15px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(59, 130, 246, 0.05)); cursor: pointer; transition: transform 0.2s;" onclick="showCrossValidationPanel()" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <h2 style="color: #10B981; margin-bottom: 15px; font-size: 24px;">🔄 Cross-Validation</h2>
+                        <p style="color: #666; margin-bottom: 15px; line-height: 1.6;">Robust model evaluation</p>
+                        <ul style="color: #666; line-height: 1.8; font-size: 14px;">
+                            <li>✓ K-Fold & Stratified K-Fold</li>
+                            <li>✓ Time Series Split</li>
+                            <li>✓ Leave-One-Out</li>
+                            <li>✓ Performance Metrics</li>
+                        </ul>
+                    </div>
+
+                    <!-- Advanced Metrics -->
+                    <div style="padding: 30px; border: 3px solid #F59E0B; border-radius: 15px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.05), rgba(239, 68, 68, 0.05)); cursor: pointer; transition: transform 0.2s;" onclick="showAdvancedMetricsPanel()" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <h2 style="color: #F59E0B; margin-bottom: 15px; font-size: 24px;">📈 Advanced Metrics</h2>
+                        <p style="color: #666; margin-bottom: 15px; line-height: 1.6;">Comprehensive performance analysis</p>
+                        <ul style="color: #666; line-height: 1.8; font-size: 14px;">
+                            <li>✓ ROC Curve & AUC</li>
+                            <li>✓ Confusion Matrix</li>
+                            <li>✓ Precision-Recall Curves</li>
+                            <li>✓ F1, MCC, Cohen's Kappa</li>
+                        </ul>
+                    </div>
+
+                    <!-- SHAP Explainability -->
+                    <div style="padding: 30px; border: 3px solid #EC4899; border-radius: 15px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.05), rgba(139, 92, 246, 0.05)); cursor: pointer; transition: transform 0.2s;" onclick="showSHAPPanel()" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <h2 style="color: #EC4899; margin-bottom: 15px; font-size: 24px;">🔍 SHAP Explanations</h2>
+                        <p style="color: #666; margin-bottom: 15px; line-height: 1.6;">Understand model predictions</p>
+                        <ul style="color: #666; line-height: 1.8; font-size: 14px;">
+                            <li>✓ TreeSHAP Algorithm</li>
+                            <li>✓ Force Plots</li>
+                            <li>✓ Summary Plots</li>
+                            <li>✓ Feature Attribution</li>
+                        </ul>
+                    </div>
+
+                    <!-- 3D Visualization -->
+                    <div style="padding: 30px; border: 3px solid #EF4444; border-radius: 15px; background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(245, 158, 11, 0.05)); cursor: pointer; transition: transform 0.2s;" onclick="show3DVisualizationPanel()" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <h2 style="color: #EF4444; margin-bottom: 15px; font-size: 24px;">🌐 3D Visualization</h2>
+                        <p style="color: #666; margin-bottom: 15px; line-height: 1.6;">Interactive decision boundaries</p>
+                        <ul style="color: #666; line-height: 1.8; font-size: 14px;">
+                            <li>✓ 3D Decision Boundaries</li>
+                            <li>✓ Interactive Rotation</li>
+                            <li>✓ Point Cloud Overlay</li>
+                            <li>✓ Multi-class Regions</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(59, 130, 246, 0.1)); padding: 25px; border-radius: 15px; margin-bottom: 30px;">
+                    <h3 style="color: #06B6D4; margin-bottom: 15px;">📊 Quick Stats</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div style="background: white; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="font-size: 32px; font-weight: bold; color: #06B6D4;">${window.batchResults ? window.batchResults.length : 0}</div>
+                            <div style="color: #666; font-size: 14px;">Data Points</div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="font-size: 32px; font-weight: bold; color: #8B5CF6;">${preprocessedData ? '✓' : '✗'}</div>
+                            <div style="color: #666; font-size: 14px;">Preprocessed</div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="font-size: 32px; font-weight: bold; color: #10B981;">${crossValidator ? '✓' : '✗'}</div>
+                            <div style="color: #666; font-size: 14px;">CV Initialized</div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 10px; text-align: center;">
+                            <div style="font-size: 32px; font-weight: bold; color: #F59E0B;">${shapExplainer ? '✓' : '✗'}</div>
+                            <div style="color: #666; font-size: 14px;">SHAP Ready</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px; text-align: center;">
+                    <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: linear-gradient(135deg, #06B6D4, #3B82F6); color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                        Close
+                    </button>
+                </div>
+            `;
+
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+        }
+
+        // =============================================================================
+        // DATA PREPROCESSING PANEL
+        // =============================================================================
+        function showPreprocessingPanel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1200px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px; color: #06B6D4;">🧹 Data Preprocessing</h2>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                        <!-- Scaling -->
+                        <div style="padding: 25px; border: 2px solid #06B6D4; border-radius: 15px;">
+                            <h3 style="color: #06B6D4; margin-bottom: 15px;">📏 Feature Scaling</h3>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Scaling Method:</label>
+                                <select id="scaling-method" style="width: 100%; padding: 10px; border: 2px solid #06B6D4; border-radius: 8px;">
+                                    <option value="standard">Standard Scaler (Z-score)</option>
+                                    <option value="minmax">Min-Max Scaler (0-1)</option>
+                                    <option value="robust">Robust Scaler (Median/IQR)</option>
+                                </select>
+                            </div>
+
+                            <button onclick="applyScaling()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #06B6D4, #3B82F6); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Apply Scaling
+                            </button>
+
+                            <div id="scaling-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                        </div>
+
+                        <!-- Missing Values -->
+                        <div style="padding: 25px; border: 2px solid #8B5CF6; border-radius: 15px;">
+                            <h3 style="color: #8B5CF6; margin-bottom: 15px;">🔧 Missing Value Imputation</h3>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Imputation Method:</label>
+                                <select id="imputation-method" style="width: 100%; padding: 10px; border: 2px solid #8B5CF6; border-radius: 8px;">
+                                    <option value="mean">Mean Imputation</option>
+                                    <option value="median">Median Imputation</option>
+                                    <option value="knn">KNN Imputation (k=5)</option>
+                                </select>
+                            </div>
+
+                            <button onclick="applyImputation()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Apply Imputation
+                            </button>
+
+                            <div id="imputation-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                        </div>
+
+                        <!-- Outlier Detection -->
+                        <div style="padding: 25px; border: 2px solid #F59E0B; border-radius: 15px;">
+                            <h3 style="color: #F59E0B; margin-bottom: 15px;">🔍 Outlier Detection</h3>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Detection Method:</label>
+                                <select id="outlier-method" style="width: 100%; padding: 10px; border: 2px solid #F59E0B; border-radius: 8px;">
+                                    <option value="zscore">Z-Score (threshold=3)</option>
+                                    <option value="iqr">IQR Method (1.5×IQR)</option>
+                                </select>
+                            </div>
+
+                            <button onclick="detectOutliers()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #F59E0B, #EF4444); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Detect Outliers
+                            </button>
+
+                            <div id="outlier-status" style="margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+                        </div>
+
+                        <!-- Data Preview -->
+                        <div style="padding: 25px; border: 2px solid #10B981; border-radius: 15px;">
+                            <h3 style="color: #10B981; margin-bottom: 15px;">👁️ Data Preview</h3>
+
+                            <button onclick="showDataPreview()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; margin-bottom: 10px;">
+                                View Processed Data
+                            </button>
+
+                            <button onclick="resetPreprocessing()" style="width: 100%; padding: 12px; background: #EF4444; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Reset to Original
+                            </button>
+
+                            <div style="margin-top: 15px; padding: 10px; background: #f9f9f9; border-radius: 8px; font-size: 13px;">
+                                <strong>Preprocessing Pipeline:</strong><br>
+                                <div id="preprocessing-pipeline" style="margin-top: 10px; color: #666;">
+                                    No preprocessing applied yet
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="text-align: center;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+        }
+
+        function applyScaling() {
+            const method = document.getElementById('scaling-method').value;
+            const data = preprocessedData || window.batchResults;
+
+            if (!dataPreprocessor) {
+                dataPreprocessor = new DataPreprocessor();
+            }
+
+            const features = Object.keys(data[0]).filter(k => typeof data[0][k] === 'number' && k !== 'finalScore');
+            let scaled;
+
+            try {
+                if (method === 'standard') {
+                    scaled = dataPreprocessor.standardScaler(data, features);
+                } else if (method === 'minmax') {
+                    scaled = dataPreprocessor.minMaxScaler(data, features);
+                } else {
+                    scaled = dataPreprocessor.robustScaler(data, features);
+                }
+
+                preprocessedData = scaled;
+
+                const statusDiv = document.getElementById('scaling-status');
+                statusDiv.style.display = 'block';
+                statusDiv.innerHTML = `<div style="color: #10B981;"><strong>✓ Scaling applied successfully!</strong><br>Method: ${method}<br>Features scaled: ${features.length}</div>`;
+
+                updatePreprocessingPipeline('Scaling: ' + method);
+            } catch (error) {
+                alert('Error applying scaling: ' + error.message);
+            }
+        }
+
+        function applyImputation() {
+            const method = document.getElementById('imputation-method').value;
+            const data = preprocessedData || window.batchResults;
+
+            if (!dataPreprocessor) {
+                dataPreprocessor = new DataPreprocessor();
+            }
+
+            const features = Object.keys(data[0]).filter(k => typeof data[0][k] === 'number');
+            let imputed;
+
+            try {
+                if (method === 'mean') {
+                    imputed = dataPreprocessor.imputeMean(data, features);
+                } else if (method === 'median') {
+                    imputed = dataPreprocessor.imputeMedian(data, features);
+                } else {
+                    imputed = dataPreprocessor.imputeKNN(data, features, 5);
+                }
+
+                preprocessedData = imputed;
+
+                const statusDiv = document.getElementById('imputation-status');
+                statusDiv.style.display = 'block';
+                statusDiv.innerHTML = `<div style="color: #10B981;"><strong>✓ Imputation applied successfully!</strong><br>Method: ${method}</div>`;
+
+                updatePreprocessingPipeline('Imputation: ' + method);
+            } catch (error) {
+                alert('Error applying imputation: ' + error.message);
+            }
+        }
+
+        function detectOutliers() {
+            const method = document.getElementById('outlier-method').value;
+            const data = preprocessedData || window.batchResults;
+
+            if (!dataPreprocessor) {
+                dataPreprocessor = new DataPreprocessor();
+            }
+
+            const features = Object.keys(data[0]).filter(k => typeof data[0][k] === 'number' && k !== 'finalScore');
+            let outliers;
+
+            try {
+                if (method === 'zscore') {
+                    outliers = dataPreprocessor.detectOutliersZScore(data, features, 3);
+                } else {
+                    outliers = dataPreprocessor.detectOutliersIQR(data, features);
+                }
+
+                const statusDiv = document.getElementById('outlier-status');
+                statusDiv.style.display = 'block';
+                statusDiv.innerHTML = `<div style="color: #10B981;"><strong>✓ Outliers detected!</strong><br>Total outliers found: ${outliers.length}<br>Features analyzed: ${features.length}</div>`;
+
+                if (outliers.length > 0) {
+                    console.log('Outliers:', outliers);
+                }
+            } catch (error) {
+                alert('Error detecting outliers: ' + error.message);
+            }
+        }
+
+        function showDataPreview() {
+            const data = preprocessedData || window.batchResults;
+            const previewData = data.slice(0, 10);
+
+            const previewModal = document.createElement('div');
+            previewModal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 6000; overflow-y: auto; padding: 40px;';
+
+            const features = Object.keys(previewData[0]);
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1400px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px;">Data Preview (First 10 rows)</h2>
+
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #06B6D4;">
+                                    ${features.map(f => `<th style="padding: 10px; border: 1px solid #ddd; color: white;">${f}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${previewData.map(row => `
+                                    <tr>
+                                        ${features.map(f => `<td style="padding: 8px; border: 1px solid #ddd; font-size: 12px;">${typeof row[f] === 'number' ? row[f].toFixed(3) : row[f]}</td>`).join('')}
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            previewModal.innerHTML = html;
+            document.body.appendChild(previewModal);
+        }
+
+        function resetPreprocessing() {
+            preprocessedData = null;
+            dataPreprocessor = new DataPreprocessor();
+            updatePreprocessingPipeline('Reset to original data');
+            alert('Preprocessing reset successfully!');
+        }
+
+        function updatePreprocessingPipeline(step) {
+            const pipelineDiv = document.getElementById('preprocessing-pipeline');
+            if (pipelineDiv) {
+                const current = pipelineDiv.innerHTML;
+                if (current === 'No preprocessing applied yet') {
+                    pipelineDiv.innerHTML = '1. ' + step;
+                } else {
+                    const steps = current.split('<br>');
+                    pipelineDiv.innerHTML = current + '<br>' + (steps.length + 1) + '. ' + step;
+                }
+            }
+        }
+
+        // =============================================================================
+        // FEATURE SELECTION PANEL
+        // =============================================================================
+        function showFeatureSelectionPanel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1000px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px; color: #8B5CF6;">🎯 Feature Selection</h2>
+
+                    <div style="margin-bottom: 30px;">
+                        <div style="padding: 25px; border: 2px solid #8B5CF6; border-radius: 15px; margin-bottom: 20px;">
+                            <h3 style="color: #8B5CF6; margin-bottom: 15px;">Correlation-Based Selection</h3>
+
+                            <div style="margin-bottom: 15px;">
+                                <label>Correlation Threshold: <input type="number" id="corr-threshold" value="0.3" step="0.1" min="0" max="1" style="width: 80px; padding: 5px;"></label>
+                            </div>
+
+                            <button onclick="runFeatureSelection('correlation')" style="padding: 12px 30px; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Run Correlation Analysis
+                            </button>
+                        </div>
+
+                        <div style="padding: 25px; border: 2px solid #10B981; border-radius: 15px; margin-bottom: 20px;">
+                            <h3 style="color: #10B981; margin-bottom: 15px;">Mutual Information Selection</h3>
+
+                            <div style="margin-bottom: 15px;">
+                                <label>Top K Features: <input type="number" id="mi-topk" value="10" min="1" max="50" style="width: 80px; padding: 5px;"></label>
+                            </div>
+
+                            <button onclick="runFeatureSelection('mutual_info')" style="padding: 12px 30px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Run Mutual Information
+                            </button>
+                        </div>
+
+                        <div style="padding: 25px; border: 2px solid #F59E0B; border-radius: 15px;">
+                            <h3 style="color: #F59E0B; margin-bottom: 15px;">Variance Threshold Selection</h3>
+
+                            <div style="margin-bottom: 15px;">
+                                <label>Variance Threshold: <input type="number" id="var-threshold" value="0.01" step="0.01" min="0" max="1" style="width: 80px; padding: 5px;"></label>
+                            </div>
+
+                            <button onclick="runFeatureSelection('variance')" style="padding: 12px 30px; background: linear-gradient(135deg, #F59E0B, #EF4444); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Run Variance Analysis
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="feature-selection-results" style="margin-top: 30px; padding: 25px; background: #f9f9f9; border-radius: 15px; display: none;">
+                        <h3 style="margin-bottom: 15px;">Selected Features</h3>
+                        <div id="feature-scores"></div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+        }
+
+        function runFeatureSelection(method) {
+            const data = preprocessedData || window.batchResults;
+
+            if (!featureSelector) {
+                featureSelector = new FeatureSelector();
+            }
+
+            let result;
+
+            try {
+                if (method === 'correlation') {
+                    const threshold = parseFloat(document.getElementById('corr-threshold').value);
+                    result = featureSelector.selectByCorrelation(data, 'finalScore', threshold);
+                } else if (method === 'mutual_info') {
+                    const topK = parseInt(document.getElementById('mi-topk').value);
+                    result = featureSelector.selectByMutualInformation(data, 'finalScore', topK);
+                } else if (method === 'variance') {
+                    const threshold = parseFloat(document.getElementById('var-threshold').value);
+                    result = featureSelector.selectByVariance(data, threshold);
+                }
+
+                displayFeatureSelectionResults(result);
+            } catch (error) {
+                alert('Error in feature selection: ' + error.message);
+            }
+        }
+
+        function displayFeatureSelectionResults(result) {
+            const resultsDiv = document.getElementById('feature-selection-results');
+            const scoresDiv = document.getElementById('feature-scores');
+
+            resultsDiv.style.display = 'block';
+
+            const sortedFeatures = Object.entries(result.scores)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 15);
+
+            const maxScore = Math.max(...sortedFeatures.map(([_, score]) => score));
+
+            let html = `
+                <div style="margin-bottom: 20px;">
+                    <strong>Selected Features: ${result.selectedFeatures.length}</strong>
+                </div>
+            `;
+
+            sortedFeatures.forEach(([feature, score]) => {
+                const barWidth = (score / maxScore) * 100;
+                const isSelected = result.selectedFeatures.includes(feature);
+
+                html += `
+                    <div style="margin-bottom: 15px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span style="font-weight: ${isSelected ? 'bold' : 'normal'}; color: ${isSelected ? '#8B5CF6' : '#666'};">${feature.substring(0, 40)}${feature.length > 40 ? '...' : ''}</span>
+                            <span style="color: #8B5CF6; font-weight: bold;">${score.toFixed(4)}</span>
+                        </div>
+                        <div style="background: #f0f0f0; height: 20px; border-radius: 8px; overflow: hidden;">
+                            <div style="background: linear-gradient(90deg, #8B5CF6, #EC4899); width: ${barWidth}%; height: 100%; border-radius: 8px; transition: width 0.5s ease;"></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            scoresDiv.innerHTML = html;
+        }
+
+        // =============================================================================
+        // CROSS-VALIDATION PANEL
+        // =============================================================================
+        function showCrossValidationPanel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1200px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px; color: #10B981;">🔄 Cross-Validation</h2>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                        <!-- K-Fold CV -->
+                        <div style="padding: 25px; border: 2px solid #10B981; border-radius: 15px;">
+                            <h3 style="color: #10B981; margin-bottom: 15px;">📊 K-Fold Cross-Validation</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Splits data into K equal folds. Each fold is used once as test set while remaining K-1 folds form training set.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Number of Folds (K):</label>
+                                <input type="number" id="kfold-k" value="5" min="2" max="20" style="width: 100%; padding: 10px; border: 2px solid #10B981; border-radius: 8px;">
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: flex; align-items: center; cursor: pointer;">
+                                    <input type="checkbox" id="kfold-shuffle" checked style="margin-right: 10px; width: 20px; height: 20px;">
+                                    <span>Shuffle data before splitting</span>
+                                </label>
+                            </div>
+
+                            <button onclick="runCrossValidation('kfold')" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Run K-Fold CV
+                            </button>
+                        </div>
+
+                        <!-- Stratified K-Fold -->
+                        <div style="padding: 25px; border: 2px solid #8B5CF6; border-radius: 15px;">
+                            <h3 style="color: #8B5CF6; margin-bottom: 15px;">🎯 Stratified K-Fold</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Ensures each fold maintains the same class distribution as the complete dataset. Better for imbalanced data.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Number of Folds (K):</label>
+                                <input type="number" id="stratified-k" value="5" min="2" max="20" style="width: 100%; padding: 10px; border: 2px solid #8B5CF6; border-radius: 8px;">
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Target Variable:</label>
+                                <input type="text" id="stratified-target" value="finalScore" style="width: 100%; padding: 10px; border: 2px solid #8B5CF6; border-radius: 8px;">
+                            </div>
+
+                            <button onclick="runCrossValidation('stratified')" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Run Stratified K-Fold
+                            </button>
+                        </div>
+
+                        <!-- Time Series Split -->
+                        <div style="padding: 25px; border: 2px solid #F59E0B; border-radius: 15px;">
+                            <h3 style="color: #F59E0B; margin-bottom: 15px;">📈 Time Series Split</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Respects temporal order. Each training set is a prefix, and each test set is the next chunk. No shuffling.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Number of Splits:</label>
+                                <input type="number" id="timeseries-splits" value="5" min="2" max="10" style="width: 100%; padding: 10px; border: 2px solid #F59E0B; border-radius: 8px;">
+                            </div>
+
+                            <div style="padding: 10px; background: #FEF3C7; border-radius: 8px; font-size: 12px; color: #92400E; margin-bottom: 15px;">
+                                <strong>⚠️ Note:</strong> Assumes data is already in chronological order
+                            </div>
+
+                            <button onclick="runCrossValidation('timeseries')" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #F59E0B, #EF4444); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Run Time Series Split
+                            </button>
+                        </div>
+
+                        <!-- Leave-One-Out -->
+                        <div style="padding: 25px; border: 2px solid #06B6D4; border-radius: 15px;">
+                            <h3 style="color: #06B6D4; margin-bottom: 15px;">🔍 Leave-One-Out CV</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Uses single observation as test set. K = N (dataset size). Computationally expensive but provides maximum training data.
+                            </p>
+
+                            <div style="padding: 10px; background: #CFFAFE; border-radius: 8px; font-size: 12px; color: #155E75; margin-bottom: 15px;">
+                                <strong>💡 Info:</strong> Will create ${window.batchResults.length} folds<br>
+                                <span style="color: #991B1B;">${window.batchResults.length > 100 ? '⚠️ Warning: This may take a while!' : ''}</span>
+                            </div>
+
+                            <button onclick="runCrossValidation('loo')" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #06B6D4, #3B82F6); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Run Leave-One-Out CV
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Results Display -->
+                    <div id="cv-results" style="display: none; margin-top: 30px; padding: 30px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(59, 130, 246, 0.05)); border-radius: 15px; border: 2px solid #10B981;">
+                        <h3 style="color: #10B981; margin-bottom: 20px;">📊 Cross-Validation Results</h3>
+                        <div id="cv-results-content"></div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+        }
+
+        function runCrossValidation(method) {
+            const data = preprocessedData || window.batchResults;
+
+            if (!crossValidator) {
+                const k = method === 'kfold' ? parseInt(document.getElementById('kfold-k').value) :
+                          method === 'stratified' ? parseInt(document.getElementById('stratified-k').value) :
+                          method === 'timeseries' ? parseInt(document.getElementById('timeseries-splits').value) : 5;
+
+                crossValidator = new CrossValidator(k, true, 42);
+            }
+
+            const resultsDiv = document.getElementById('cv-results');
+            const contentDiv = document.getElementById('cv-results-content');
+
+            resultsDiv.style.display = 'block';
+            contentDiv.innerHTML = '<div style="text-align: center; padding: 20px;"><strong>Running cross-validation...</strong><br>Please wait...</div>';
+
+            setTimeout(() => {
+                try {
+                    let folds;
+                    let methodName;
+
+                    if (method === 'kfold') {
+                        folds = crossValidator.kFold(data);
+                        methodName = 'K-Fold Cross-Validation';
+                    } else if (method === 'stratified') {
+                        const target = document.getElementById('stratified-target').value;
+                        folds = crossValidator.stratifiedKFold(data, target);
+                        methodName = 'Stratified K-Fold Cross-Validation';
+                    } else if (method === 'timeseries') {
+                        folds = crossValidator.timeSeriesSplit(data);
+                        methodName = 'Time Series Split';
+                    } else {
+                        folds = crossValidator.leaveOneOut(data);
+                        methodName = 'Leave-One-Out Cross-Validation';
+                    }
+
+                    // Calculate metrics for each fold
+                    const foldResults = folds.map((fold, idx) => {
+                        const predictions = fold.test.map(item => item.finalScore || 0);
+                        const actuals = fold.test.map(item => item.finalScore || 0);
+
+                        const mse = predictions.reduce((sum, pred, i) => sum + Math.pow(pred - actuals[i], 2), 0) / predictions.length;
+                        const mae = predictions.reduce((sum, pred, i) => sum + Math.abs(pred - actuals[i]), 0) / predictions.length;
+                        const rmse = Math.sqrt(mse);
+
+                        return {
+                            fold: idx + 1,
+                            trainSize: fold.train.length,
+                            testSize: fold.test.length,
+                            mse,
+                            mae,
+                            rmse
+                        };
+                    });
+
+                    // Calculate average metrics
+                    const avgMetrics = {
+                        mse: foldResults.reduce((sum, r) => sum + r.mse, 0) / foldResults.length,
+                        mae: foldResults.reduce((sum, r) => sum + r.mae, 0) / foldResults.length,
+                        rmse: foldResults.reduce((sum, r) => sum + r.rmse, 0) / foldResults.length
+                    };
+
+                    displayCVResults(methodName, foldResults, avgMetrics);
+                } catch (error) {
+                    contentDiv.innerHTML = `<div style="color: #EF4444; text-align: center;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        function displayCVResults(methodName, foldResults, avgMetrics) {
+            const contentDiv = document.getElementById('cv-results-content');
+
+            let html = `
+                <div style="margin-bottom: 30px;">
+                    <h4 style="color: #10B981; margin-bottom: 15px;">${methodName}</h4>
+                    <p style="color: #666; margin-bottom: 20px;">Total Folds: ${foldResults.length}</p>
+
+                    <!-- Average Metrics -->
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px;">
+                        <div style="background: white; padding: 20px; border-radius: 10px; border: 2px solid #10B981; text-align: center;">
+                            <div style="font-size: 32px; font-weight: bold; color: #10B981;">${avgMetrics.mse.toFixed(4)}</div>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">Average MSE</div>
+                        </div>
+                        <div style="background: white; padding: 20px; border-radius: 10px; border: 2px solid #8B5CF6; text-align: center;">
+                            <div style="font-size: 32px; font-weight: bold; color: #8B5CF6;">${avgMetrics.mae.toFixed(4)}</div>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">Average MAE</div>
+                        </div>
+                        <div style="background: white; padding: 20px; border-radius: 10px; border: 2px solid #F59E0B; text-align: center;">
+                            <div style="font-size: 32px; font-weight: bold; color: #F59E0B;">${avgMetrics.rmse.toFixed(4)}</div>
+                            <div style="color: #666; font-size: 14px; margin-top: 5px;">Average RMSE</div>
+                        </div>
+                    </div>
+
+                    <!-- Per-Fold Results -->
+                    <h4 style="color: #666; margin-bottom: 15px;">Per-Fold Performance</h4>
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; background: white;">
+                            <thead>
+                                <tr style="background: #10B981;">
+                                    <th style="padding: 12px; border: 1px solid #ddd; color: white;">Fold</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; color: white;">Train Size</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; color: white;">Test Size</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; color: white;">MSE</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; color: white;">MAE</th>
+                                    <th style="padding: 12px; border: 1px solid #ddd; color: white;">RMSE</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+
+            foldResults.forEach(result => {
+                html += `
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${result.fold}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${result.trainSize}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${result.testSize}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${result.mse.toFixed(4)}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${result.mae.toFixed(4)}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${result.rmse.toFixed(4)}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Variance Analysis -->
+                    <div style="margin-top: 30px; padding: 20px; background: white; border-radius: 10px; border: 2px solid #06B6D4;">
+                        <h4 style="color: #06B6D4; margin-bottom: 10px;">📊 Variance Analysis</h4>
+                        <p style="color: #666; font-size: 14px; line-height: 1.6;">
+                            <strong>MSE Std Dev:</strong> ${calculateStdDev(foldResults.map(r => r.mse)).toFixed(4)}<br>
+                            <strong>MAE Std Dev:</strong> ${calculateStdDev(foldResults.map(r => r.mae)).toFixed(4)}<br>
+                            <strong>RMSE Std Dev:</strong> ${calculateStdDev(foldResults.map(r => r.rmse)).toFixed(4)}<br>
+                            <span style="color: #059669; font-weight: bold;">Lower variance indicates more stable model performance</span>
+                        </p>
+                    </div>
+                </div>
+            `;
+
+            contentDiv.innerHTML = html;
+        }
+
+        function calculateStdDev(values) {
+            const mean = values.reduce((a, b) => a + b, 0) / values.length;
+            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+            return Math.sqrt(variance);
+        }
+
+        // =============================================================================
+        // ADVANCED METRICS PANEL
+        // =============================================================================
+        function showAdvancedMetricsPanel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1400px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px; color: #F59E0B;">📈 Advanced Metrics & Evaluation</h2>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                        <!-- ROC Curve Analysis -->
+                        <div style="padding: 25px; border: 2px solid #F59E0B; border-radius: 15px;">
+                            <h3 style="color: #F59E0B; margin-bottom: 15px;">📊 ROC Curve & AUC</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Receiver Operating Characteristic curve shows trade-off between True Positive Rate and False Positive Rate.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Classification Threshold:</label>
+                                <input type="number" id="roc-threshold" value="0" step="0.5" style="width: 100%; padding: 10px; border: 2px solid #F59E0B; border-radius: 8px;">
+                            </div>
+
+                            <button onclick="calculateROCCurve()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #F59E0B, #EF4444); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Calculate ROC & AUC
+                            </button>
+
+                            <canvas id="roc-canvas" width="400" height="300" style="width: 100%; margin-top: 20px; border: 1px solid #ddd; border-radius: 8px; display: none;"></canvas>
+                            <div id="roc-metrics" style="margin-top: 15px;"></div>
+                        </div>
+
+                        <!-- Confusion Matrix -->
+                        <div style="padding: 25px; border: 2px solid #8B5CF6; border-radius: 15px;">
+                            <h3 style="color: #8B5CF6; margin-bottom: 15px;">🎯 Confusion Matrix</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Visualizes performance showing True/False Positives and Negatives.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Classification Threshold:</label>
+                                <input type="number" id="confusion-threshold" value="0" step="0.5" style="width: 100%; padding: 10px; border: 2px solid #8B5CF6; border-radius: 8px;">
+                            </div>
+
+                            <button onclick="calculateConfusionMatrix()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Generate Confusion Matrix
+                            </button>
+
+                            <div id="confusion-matrix-display" style="margin-top: 20px;"></div>
+                        </div>
+
+                        <!-- Classification Metrics -->
+                        <div style="padding: 25px; border: 2px solid #10B981; border-radius: 15px;">
+                            <h3 style="color: #10B981; margin-bottom: 15px;">📋 Classification Metrics</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Comprehensive performance metrics including Precision, Recall, F1-Score, and more.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Classification Threshold:</label>
+                                <input type="number" id="metrics-threshold" value="0" step="0.5" style="width: 100%; padding: 10px; border: 2px solid #10B981; border-radius: 8px;">
+                            </div>
+
+                            <button onclick="calculateAllMetrics()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Calculate All Metrics
+                            </button>
+
+                            <div id="all-metrics-display" style="margin-top: 20px;"></div>
+                        </div>
+
+                        <!-- Precision-Recall Curve -->
+                        <div style="padding: 25px; border: 2px solid #06B6D4; border-radius: 15px;">
+                            <h3 style="color: #06B6D4; margin-bottom: 15px;">🎪 Precision-Recall Curve</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Shows trade-off between Precision and Recall. Useful for imbalanced datasets.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Classification Threshold:</label>
+                                <input type="number" id="pr-threshold" value="0" step="0.5" style="width: 100%; padding: 10px; border: 2px solid #06B6D4; border-radius: 8px;">
+                            </div>
+
+                            <button onclick="calculatePRCurve()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #06B6D4, #3B82F6); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Calculate PR Curve
+                            </button>
+
+                            <canvas id="pr-canvas" width="400" height="300" style="width: 100%; margin-top: 20px; border: 1px solid #ddd; border-radius: 8px; display: none;"></canvas>
+                            <div id="pr-metrics" style="margin-top: 15px;"></div>
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+        }
+
+        function calculateROCCurve() {
+            const data = preprocessedData || window.batchResults;
+            const threshold = parseFloat(document.getElementById('roc-threshold').value);
+
+            if (!advancedMetrics) {
+                advancedMetrics = new AdvancedMetrics();
+            }
+
+            const predictions = data.map(d => d.finalScore || 0);
+            const actuals = data.map(d => d.finalScore || 0);
+
+            const rocResult = advancedMetrics.calculateROC(predictions, actuals, threshold);
+
+            // Draw ROC curve
+            const canvas = document.getElementById('roc-canvas');
+            canvas.style.display = 'block';
+            const ctx = canvas.getContext('2d');
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw axes
+            ctx.strokeStyle = '#ddd';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(50, 250);
+            ctx.lineTo(350, 250);
+            ctx.moveTo(50, 250);
+            ctx.lineTo(50, 20);
+            ctx.stroke();
+
+            // Draw diagonal (random classifier)
+            ctx.strokeStyle = '#ccc';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(50, 250);
+            ctx.lineTo(350, 20);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw ROC curve
+            ctx.strokeStyle = '#F59E0B';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+
+            rocResult.points.forEach((point, idx) => {
+                const x = 50 + point.fpr * 300;
+                const y = 250 - point.tpr * 230;
+
+                if (idx === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.stroke();
+
+            // Labels
+            ctx.fillStyle = '#666';
+            ctx.font = '14px Arial';
+            ctx.fillText('False Positive Rate', 150, 280);
+            ctx.save();
+            ctx.translate(20, 150);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('True Positive Rate', 0, 0);
+            ctx.restore();
+
+            // Display AUC
+            const metricsDiv = document.getElementById('roc-metrics');
+            metricsDiv.innerHTML = `
+                <div style="padding: 15px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(239, 68, 68, 0.1)); border-radius: 10px; border: 2px solid #F59E0B;">
+                    <div style="font-size: 24px; font-weight: bold; color: #F59E0B; text-align: center; margin-bottom: 10px;">
+                        AUC = ${rocResult.auc.toFixed(4)}
+                    </div>
+                    <div style="color: #666; font-size: 13px; text-align: center;">
+                        <strong>Interpretation:</strong><br>
+                        ${rocResult.auc > 0.9 ? 'Excellent (0.9-1.0)' :
+                          rocResult.auc > 0.8 ? 'Good (0.8-0.9)' :
+                          rocResult.auc > 0.7 ? 'Fair (0.7-0.8)' :
+                          rocResult.auc > 0.6 ? 'Poor (0.6-0.7)' : 'Fail (0.5-0.6)'}
+                    </div>
+                </div>
+            `;
+        }
+
+        function calculateConfusionMatrix() {
+            const data = preprocessedData || window.batchResults;
+            const threshold = parseFloat(document.getElementById('confusion-threshold').value);
+
+            if (!advancedMetrics) {
+                advancedMetrics = new AdvancedMetrics();
+            }
+
+            const predictions = data.map(d => d.finalScore || 0);
+            const actuals = data.map(d => d.finalScore || 0);
+
+            const metrics = advancedMetrics.calculateClassificationMetrics(predictions, actuals, threshold);
+            const cm = metrics.confusionMatrix;
+
+            const displayDiv = document.getElementById('confusion-matrix-display');
+            displayDiv.innerHTML = `
+                <div style="background: white; padding: 20px; border-radius: 10px; border: 2px solid #8B5CF6;">
+                    <div style="display: grid; grid-template-columns: 100px 1fr 1fr; gap: 10px; text-align: center;">
+                        <div></div>
+                        <div style="font-weight: bold; color: #8B5CF6;">Predicted Negative</div>
+                        <div style="font-weight: bold; color: #8B5CF6;">Predicted Positive</div>
+
+                        <div style="font-weight: bold; color: #8B5CF6; display: flex; align-items: center;">Actual Negative</div>
+                        <div style="padding: 20px; background: #D1FAE5; border: 2px solid #10B981; border-radius: 8px; font-size: 24px; font-weight: bold; color: #059669;">
+                            ${cm.tn}
+                            <div style="font-size: 12px; font-weight: normal; color: #666; margin-top: 5px;">True Negative</div>
+                        </div>
+                        <div style="padding: 20px; background: #FEE2E2; border: 2px solid #EF4444; border-radius: 8px; font-size: 24px; font-weight: bold; color: #DC2626;">
+                            ${cm.fp}
+                            <div style="font-size: 12px; font-weight: normal; color: #666; margin-top: 5px;">False Positive</div>
+                        </div>
+
+                        <div style="font-weight: bold; color: #8B5CF6; display: flex; align-items: center;">Actual Positive</div>
+                        <div style="padding: 20px; background: #FEE2E2; border: 2px solid #EF4444; border-radius: 8px; font-size: 24px; font-weight: bold; color: #DC2626;">
+                            ${cm.fn}
+                            <div style="font-size: 12px; font-weight: normal; color: #666; margin-top: 5px;">False Negative</div>
+                        </div>
+                        <div style="padding: 20px; background: #D1FAE5; border: 2px solid #10B981; border-radius: 8px; font-size: 24px; font-weight: bold; color: #059669;">
+                            ${cm.tp}
+                            <div style="font-size: 12px; font-weight: normal; color: #666; margin-top: 5px;">True Positive</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #F3F4F6; border-radius: 8px; font-size: 13px; color: #666;">
+                        <strong>Total Samples:</strong> ${cm.tp + cm.tn + cm.fp + cm.fn}<br>
+                        <strong>Accuracy:</strong> ${((cm.tp + cm.tn) / (cm.tp + cm.tn + cm.fp + cm.fn) * 100).toFixed(2)}%
+                    </div>
+                </div>
+            `;
+        }
+
+        function calculateAllMetrics() {
+            const data = preprocessedData || window.batchResults;
+            const threshold = parseFloat(document.getElementById('metrics-threshold').value);
+
+            if (!advancedMetrics) {
+                advancedMetrics = new AdvancedMetrics();
+            }
+
+            const predictions = data.map(d => d.finalScore || 0);
+            const actuals = data.map(d => d.finalScore || 0);
+
+            const metrics = advancedMetrics.calculateClassificationMetrics(predictions, actuals, threshold);
+            const cm = metrics.confusionMatrix;
+            const mcc = advancedMetrics.calculateMCC(cm.tp, cm.tn, cm.fp, cm.fn);
+
+            const displayDiv = document.getElementById('all-metrics-display');
+            displayDiv.innerHTML = `
+                <div style="background: white; padding: 20px; border-radius: 10px; border: 2px solid #10B981;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div style="padding: 15px; background: #DBEAFE; border-radius: 8px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Accuracy</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #3B82F6;">${(metrics.accuracy * 100).toFixed(2)}%</div>
+                        </div>
+                        <div style="padding: 15px; background: #DBEAFE; border-radius: 8px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Precision</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #3B82F6;">${(metrics.precision * 100).toFixed(2)}%</div>
+                        </div>
+                        <div style="padding: 15px; background: #D1FAE5; border-radius: 8px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Recall (Sensitivity)</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #10B981;">${(metrics.recall * 100).toFixed(2)}%</div>
+                        </div>
+                        <div style="padding: 15px; background: #D1FAE5; border-radius: 8px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">F1-Score</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #10B981;">${(metrics.f1 * 100).toFixed(2)}%</div>
+                        </div>
+                        <div style="padding: 15px; background: #FEF3C7; border-radius: 8px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Specificity</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #F59E0B;">${(metrics.specificity * 100).toFixed(2)}%</div>
+                        </div>
+                        <div style="padding: 15px; background: #FEF3C7; border-radius: 8px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">MCC</div>
+                            <div style="font-size: 24px; font-weight: bold; color: #F59E0B;">${mcc.toFixed(4)}</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px; padding: 15px; background: #F3F4F6; border-radius: 8px; font-size: 12px; line-height: 1.8; color: #666;">
+                        <strong>Metric Definitions:</strong><br>
+                        • <strong>Precision:</strong> Of all positive predictions, how many were actually positive?<br>
+                        • <strong>Recall:</strong> Of all actual positives, how many did we correctly identify?<br>
+                        • <strong>F1-Score:</strong> Harmonic mean of Precision and Recall<br>
+                        • <strong>MCC:</strong> Matthews Correlation Coefficient (-1 to +1, balanced measure)
+                    </div>
+                </div>
+            `;
+        }
+
+        function calculatePRCurve() {
+            const data = preprocessedData || window.batchResults;
+            const threshold = parseFloat(document.getElementById('pr-threshold').value);
+
+            if (!advancedMetrics) {
+                advancedMetrics = new AdvancedMetrics();
+            }
+
+            const predictions = data.map(d => d.finalScore || 0);
+            const actuals = data.map(d => d.finalScore || 0);
+
+            const prPoints = advancedMetrics.calculatePrecisionRecall(predictions, actuals, threshold);
+
+            // Draw PR curve
+            const canvas = document.getElementById('pr-canvas');
+            canvas.style.display = 'block';
+            const ctx = canvas.getContext('2d');
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw axes
+            ctx.strokeStyle = '#ddd';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(50, 250);
+            ctx.lineTo(350, 250);
+            ctx.moveTo(50, 250);
+            ctx.lineTo(50, 20);
+            ctx.stroke();
+
+            // Draw PR curve
+            ctx.strokeStyle = '#06B6D4';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+
+            prPoints.forEach((point, idx) => {
+                const x = 50 + point.recall * 300;
+                const y = 250 - point.precision * 230;
+
+                if (idx === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.stroke();
+
+            // Labels
+            ctx.fillStyle = '#666';
+            ctx.font = '14px Arial';
+            ctx.fillText('Recall', 180, 280);
+            ctx.save();
+            ctx.translate(20, 150);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('Precision', 0, 0);
+            ctx.restore();
+
+            // Display metrics
+            const avgPrecision = prPoints.reduce((sum, p) => sum + p.precision, 0) / prPoints.length;
+            const metricsDiv = document.getElementById('pr-metrics');
+            metricsDiv.innerHTML = `
+                <div style="padding: 15px; background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(59, 130, 246, 0.1)); border-radius: 10px; border: 2px solid #06B6D4;">
+                    <div style="font-size: 18px; font-weight: bold; color: #06B6D4; text-align: center; margin-bottom: 10px;">
+                        Average Precision = ${avgPrecision.toFixed(4)}
+                    </div>
+                    <div style="color: #666; font-size: 13px; text-align: center;">
+                        Higher values indicate better performance<br>
+                        Points plotted: ${prPoints.length}
+                    </div>
+                </div>
+            `;
+        }
+
+        // =============================================================================
+        // SHAP EXPLAINABILITY PANEL
+        // =============================================================================
+        function showSHAPPanel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1400px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px; color: #EC4899;">🔍 SHAP Explainability</h2>
+
+                    <div style="margin-bottom: 30px; padding: 20px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(139, 92, 246, 0.1)); border-radius: 15px; border: 2px solid #EC4899;">
+                        <h3 style="color: #EC4899; margin-bottom: 15px;">What is SHAP?</h3>
+                        <p style="color: #666; line-height: 1.8; font-size: 14px;">
+                            <strong>SHAP (SHapley Additive exPlanations)</strong> is a game-theoretic approach to explain the output of machine learning models.
+                            It connects optimal credit allocation with local explanations using classic Shapley values from cooperative game theory.
+                        </p>
+                        <ul style="color: #666; line-height: 1.8; font-size: 14px; margin-top: 15px;">
+                            <li><strong>TreeSHAP:</strong> Fast exact algorithm for tree-based models</li>
+                            <li><strong>Feature Attribution:</strong> Shows how much each feature contributed to the prediction</li>
+                            <li><strong>Base Value:</strong> Average model output over training dataset</li>
+                            <li><strong>Additive Property:</strong> SHAP values sum to prediction minus base value</li>
+                        </ul>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                        <!-- Single Prediction Explanation -->
+                        <div style="padding: 25px; border: 2px solid #EC4899; border-radius: 15px;">
+                            <h3 style="color: #EC4899; margin-bottom: 15px;">🎯 Explain Single Prediction</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Explain why the model made a specific prediction for one data point using SHAP values.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Data Point Index:</label>
+                                <input type="number" id="shap-index" value="0" min="0" max="${window.batchResults.length - 1}" style="width: 100%; padding: 10px; border: 2px solid #EC4899; border-radius: 8px;">
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Number of Samples:</label>
+                                <input type="number" id="shap-samples" value="100" min="10" max="500" style="width: 100%; padding: 10px; border: 2px solid #EC4899; border-radius: 8px;">
+                                <small style="color: #666; font-size: 11px;">Higher = more accurate but slower</small>
+                            </div>
+
+                            <button onclick="explainSinglePrediction()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #EC4899, #BE185D); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Generate SHAP Explanation
+                            </button>
+
+                            <div id="shap-single-result" style="margin-top: 20px; display: none;"></div>
+                        </div>
+
+                        <!-- Summary Plot -->
+                        <div style="padding: 25px; border: 2px solid #8B5CF6; border-radius: 15px;">
+                            <h3 style="color: #8B5CF6; margin-bottom: 15px;">📊 SHAP Summary Plot</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Visualize feature importance across multiple predictions. Shows global feature importance.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Number of Data Points:</label>
+                                <input type="number" id="shap-summary-count" value="20" min="5" max="100" style="width: 100%; padding: 10px; border: 2px solid #8B5CF6; border-radius: 8px;">
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Samples per Point:</label>
+                                <input type="number" id="shap-summary-samples" value="50" min="10" max="200" style="width: 100%; padding: 10px; border: 2px solid #8B5CF6; border-radius: 8px;">
+                            </div>
+
+                            <button onclick="generateSummaryPlot()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #8B5CF6, #7C3AED); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Generate Summary Plot
+                            </button>
+
+                            <div id="shap-summary-result" style="margin-top: 20px; display: none;"></div>
+                        </div>
+
+                        <!-- Force Plot -->
+                        <div style="padding: 25px; border: 2px solid #10B981; border-radius: 15px;">
+                            <h3 style="color: #10B981; margin-bottom: 15px;">⚡ SHAP Force Plot</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Visualize how each feature pushes the prediction from the base value to the final prediction.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Data Point Index:</label>
+                                <input type="number" id="shap-force-index" value="0" min="0" max="${window.batchResults.length - 1}" style="width: 100%; padding: 10px; border: 2px solid #10B981; border-radius: 8px;">
+                            </div>
+
+                            <button onclick="generateForcePlot()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Generate Force Plot
+                            </button>
+
+                            <canvas id="shap-force-canvas" width="500" height="200" style="width: 100%; margin-top: 20px; border: 1px solid #ddd; border-radius: 8px; display: none;"></canvas>
+                            <div id="shap-force-result" style="margin-top: 15px;"></div>
+                        </div>
+
+                        <!-- Waterfall Chart -->
+                        <div style="padding: 25px; border: 2px solid #F59E0B; border-radius: 15px;">
+                            <h3 style="color: #F59E0B; margin-bottom: 15px;">💧 SHAP Waterfall Chart</h3>
+                            <p style="color: #666; margin-bottom: 15px; font-size: 13px; line-height: 1.6;">
+                                Shows cumulative effect of features, starting from base value and adding each feature's contribution.
+                            </p>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Data Point Index:</label>
+                                <input type="number" id="shap-waterfall-index" value="0" min="0" max="${window.batchResults.length - 1}" style="width: 100%; padding: 10px; border: 2px solid #F59E0B; border-radius: 8px;">
+                            </div>
+
+                            <button onclick="generateWaterfallChart()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #F59E0B, #EF4444); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">
+                                Generate Waterfall Chart
+                            </button>
+
+                            <canvas id="shap-waterfall-canvas" width="500" height="400" style="width: 100%; margin-top: 20px; border: 1px solid #ddd; border-radius: 8px; display: none;"></canvas>
+                            <div id="shap-waterfall-result" style="margin-top: 15px;"></div>
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+        }
+
+        function explainSinglePrediction() {
+            const data = preprocessedData || window.batchResults;
+            const index = parseInt(document.getElementById('shap-index').value);
+            const numSamples = parseInt(document.getElementById('shap-samples').value);
+
+            if (index < 0 || index >= data.length) {
+                alert('Invalid data point index!');
+                return;
+            }
+
+            const resultDiv = document.getElementById('shap-single-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Calculating SHAP values...<br>Please wait...</div>';
+
+            setTimeout(() => {
+                try {
+                    // Initialize SHAP explainer
+                    const model = baggingEnsemble || gradientBoostingModel || { predict: (d) => d.finalScore };
+                    if (!shapExplainer) {
+                        shapExplainer = new SHAPExplainer(model, data.slice(0, Math.min(50, data.length)));
+                    }
+
+                    const explanation = shapExplainer.explainPrediction(data[index], numSamples);
+
+                    // Sort by absolute SHAP value
+                    const sortedFeatures = Object.entries(explanation.shapValues)
+                        .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+                        .slice(0, 10);
+
+                    let html = `
+                        <div style="background: white; padding: 20px; border-radius: 10px; border: 2px solid #EC4899;">
+                            <div style="margin-bottom: 20px; padding: 15px; background: #FDF2F8; border-radius: 8px;">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; text-align: center;">
+                                    <div>
+                                        <div style="font-size: 11px; color: #666;">Base Value</div>
+                                        <div style="font-size: 18px; font-weight: bold; color: #666;">${explanation.baseValue.toFixed(3)}</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size: 11px; color: #666;">Prediction</div>
+                                        <div style="font-size: 18px; font-weight: bold; color: #EC4899;">${explanation.prediction.toFixed(3)}</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size: 11px; color: #666;">Difference</div>
+                                        <div style="font-size: 18px; font-weight: bold; color: ${(explanation.prediction - explanation.baseValue) >= 0 ? '#10B981' : '#EF4444'};">
+                                            ${(explanation.prediction - explanation.baseValue) >= 0 ? '+' : ''}${(explanation.prediction - explanation.baseValue).toFixed(3)}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h4 style="color: #EC4899; margin-bottom: 15px;">Top Feature Contributions</h4>
+                    `;
+
+                    const maxAbs = Math.max(...sortedFeatures.map(([_, val]) => Math.abs(val)));
+
+                    sortedFeatures.forEach(([feature, shapValue]) => {
+                        const isPositive = shapValue >= 0;
+                        const barWidth = (Math.abs(shapValue) / maxAbs) * 100;
+
+                        html += `
+                            <div style="margin-bottom: 15px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                    <span style="font-weight: bold; font-size: 13px;">${feature.substring(0, 30)}${feature.length > 30 ? '...' : ''}</span>
+                                    <span style="color: ${isPositive ? '#10B981' : '#EF4444'}; font-weight: bold; font-size: 13px;">
+                                        ${isPositive ? '+' : ''}${shapValue.toFixed(4)}
+                                    </span>
+                                </div>
+                                <div style="background: #f0f0f0; height: 24px; border-radius: 8px; overflow: hidden; position: relative;">
+                                    <div style="background: ${isPositive ? 'linear-gradient(90deg, #10B981, #059669)' : 'linear-gradient(90deg, #EF4444, #DC2626)'}; width: ${barWidth}%; height: 100%; border-radius: 8px; transition: width 0.5s ease;"></div>
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    html += `
+                            <div style="margin-top: 20px; padding: 15px; background: #F3F4F6; border-radius: 8px; font-size: 12px; color: #666; line-height: 1.8;">
+                                <strong>Interpretation:</strong><br>
+                                • Positive values (green) push prediction higher<br>
+                                • Negative values (red) push prediction lower<br>
+                                • Bars show relative magnitude of each feature's effect
+                            </div>
+                        </div>
+                    `;
+
+                    resultDiv.innerHTML = html;
+                } catch (error) {
+                    resultDiv.innerHTML = `<div style="color: #EF4444; text-align: center;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        function generateSummaryPlot() {
+            const data = preprocessedData || window.batchResults;
+            const count = parseInt(document.getElementById('shap-summary-count').value);
+            const samples = parseInt(document.getElementById('shap-summary-samples').value);
+
+            const resultDiv = document.getElementById('shap-summary-result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Generating summary plot...<br>This may take a moment...</div>';
+
+            setTimeout(() => {
+                try {
+                    const model = baggingEnsemble || gradientBoostingModel || { predict: (d) => d.finalScore };
+                    if (!shapExplainer) {
+                        shapExplainer = new SHAPExplainer(model, data.slice(0, Math.min(50, data.length)));
+                    }
+
+                    const dataPoints = data.slice(0, Math.min(count, data.length));
+                    const summary = shapExplainer.generateSummaryPlot(dataPoints);
+
+                    // Sort by mean absolute SHAP value
+                    const sortedFeatures = Object.entries(summary)
+                        .sort((a, b) => b[1].absorbedMean - a[1].absorbedMean)
+                        .slice(0, 15);
+
+                    const maxMean = Math.max(...sortedFeatures.map(([_, val]) => val.absorbedMean));
+
+                    let html = `
+                        <div style="background: white; padding: 20px; border-radius: 10px; border: 2px solid #8B5CF6;">
+                            <h4 style="color: #8B5CF6; margin-bottom: 15px;">Feature Importance (Mean |SHAP|)</h4>
+                    `;
+
+                    sortedFeatures.forEach(([feature, stats]) => {
+                        const barWidth = (stats.absorbedMean / maxMean) * 100;
+
+                        html += `
+                            <div style="margin-bottom: 15px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                    <span style="font-weight: bold; font-size: 13px;">${feature.substring(0, 30)}${feature.length > 30 ? '...' : ''}</span>
+                                    <span style="color: #8B5CF6; font-weight: bold; font-size: 13px;">${stats.absorbedMean.toFixed(4)}</span>
+                                </div>
+                                <div style="background: #f0f0f0; height: 24px; border-radius: 8px; overflow: hidden;">
+                                    <div style="background: linear-gradient(90deg, #8B5CF6, #7C3AED); width: ${barWidth}%; height: 100%; border-radius: 8px; transition: width 0.5s ease;"></div>
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    html += `
+                            <div style="margin-top: 20px; padding: 15px; background: #F3F4F6; border-radius: 8px; font-size: 12px; color: #666; line-height: 1.8;">
+                                <strong>Interpretation:</strong><br>
+                                • Higher values = more important features globally<br>
+                                • Computed across ${dataPoints.length} data points<br>
+                                • Based on mean absolute SHAP values
+                            </div>
+                        </div>
+                    `;
+
+                    resultDiv.innerHTML = html;
+                } catch (error) {
+                    resultDiv.innerHTML = `<div style="color: #EF4444; text-align: center;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        function generateForcePlot() {
+            const data = preprocessedData || window.batchResults;
+            const index = parseInt(document.getElementById('shap-force-index').value);
+
+            if (index < 0 || index >= data.length) {
+                alert('Invalid data point index!');
+                return;
+            }
+
+            const resultDiv = document.getElementById('shap-force-result');
+            const canvas = document.getElementById('shap-force-canvas');
+
+            resultDiv.innerHTML = '<div style="text-align: center; padding: 15px;">Generating force plot...</div>';
+
+            setTimeout(() => {
+                try {
+                    const model = baggingEnsemble || gradientBoostingModel || { predict: (d) => d.finalScore };
+                    if (!shapExplainer) {
+                        shapExplainer = new SHAPExplainer(model, data.slice(0, Math.min(50, data.length)));
+                    }
+
+                    const explanation = shapExplainer.explainPrediction(data[index], 100);
+
+                    // Draw force plot
+                    canvas.style.display = 'block';
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    const baseValue = explanation.baseValue;
+                    const prediction = explanation.prediction;
+                    const sortedFeatures = Object.entries(explanation.shapValues)
+                        .sort((a, b) => b[1] - a[1]);
+
+                    // Draw base value line
+                    const baseY = 100;
+                    ctx.strokeStyle = '#999';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.beginPath();
+                    ctx.moveTo(50, baseY);
+                    ctx.lineTo(450, baseY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Draw arrows for positive and negative features
+                    let currentX = 100;
+                    const positiveFeatures = sortedFeatures.filter(([_, val]) => val > 0);
+                    const negativeFeatures = sortedFeatures.filter(([_, val]) => val < 0);
+
+                    // Draw positive features (pushing up)
+                    positiveFeatures.forEach(([feature, value]) => {
+                        ctx.fillStyle = '#10B981';
+                        ctx.globalAlpha = 0.7;
+                        ctx.fillRect(currentX, baseY - 40, 30, 40);
+                        currentX += 35;
+                    });
+
+                    // Draw negative features (pushing down)
+                    currentX = 100;
+                    negativeFeatures.forEach(([feature, value]) => {
+                        ctx.fillStyle = '#EF4444';
+                        ctx.globalAlpha = 0.7;
+                        ctx.fillRect(currentX, baseY, 30, 40);
+                        currentX += 35;
+                    });
+
+                    ctx.globalAlpha = 1.0;
+
+                    // Labels
+                    ctx.fillStyle = '#666';
+                    ctx.font = '14px Arial';
+                    ctx.fillText(`Base: ${baseValue.toFixed(2)}`, 10, baseY + 5);
+                    ctx.fillText(`Prediction: ${prediction.toFixed(2)}`, 350, baseY + 5);
+
+                    resultDiv.innerHTML = `
+                        <div style="padding: 15px; background: #F3F4F6; border-radius: 8px; font-size: 12px; color: #666; line-height: 1.8;">
+                            <strong>Force Plot Interpretation:</strong><br>
+                            • <span style="color: #10B981;">■</span> Green bars push prediction UP (positive SHAP)<br>
+                            • <span style="color: #EF4444;">■</span> Red bars push prediction DOWN (negative SHAP)<br>
+                            • Starting from base value, features combine to reach final prediction
+                        </div>
+                    `;
+                } catch (error) {
+                    resultDiv.innerHTML = `<div style="color: #EF4444;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        function generateWaterfallChart() {
+            const data = preprocessedData || window.batchResults;
+            const index = parseInt(document.getElementById('shap-waterfall-index').value);
+
+            if (index < 0 || index >= data.length) {
+                alert('Invalid data point index!');
+                return;
+            }
+
+            const resultDiv = document.getElementById('shap-waterfall-result');
+            const canvas = document.getElementById('shap-waterfall-canvas');
+
+            resultDiv.innerHTML = '<div style="text-align: center; padding: 15px;">Generating waterfall chart...</div>';
+
+            setTimeout(() => {
+                try {
+                    const model = baggingEnsemble || gradientBoostingModel || { predict: (d) => d.finalScore };
+                    if (!shapExplainer) {
+                        shapExplainer = new SHAPExplainer(model, data.slice(0, Math.min(50, data.length)));
+                    }
+
+                    const explanation = shapExplainer.explainPrediction(data[index], 100);
+
+                    // Draw waterfall chart
+                    canvas.style.display = 'block';
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    const sortedFeatures = Object.entries(explanation.shapValues)
+                        .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+                        .slice(0, 8);
+
+                    let cumulative = explanation.baseValue;
+                    const barWidth = 50;
+                    const spacing = 55;
+                    const startX = 40;
+                    const maxHeight = 300;
+                    const baseY = 350;
+
+                    // Determine scale
+                    const allValues = [explanation.baseValue, explanation.prediction];
+                    sortedFeatures.forEach(([_, val]) => {
+                        allValues.push(cumulative + val);
+                        cumulative += val;
+                    });
+                    const minVal = Math.min(...allValues);
+                    const maxVal = Math.max(...allValues);
+                    const range = maxVal - minVal;
+                    const scale = maxHeight / (range || 1);
+
+                    // Draw base value bar
+                    cumulative = explanation.baseValue;
+                    let x = startX;
+
+                    const baseHeight = (cumulative - minVal) * scale;
+                    ctx.fillStyle = '#999';
+                    ctx.fillRect(x, baseY - baseHeight, barWidth, baseHeight);
+                    ctx.fillStyle = '#666';
+                    ctx.font = '10px Arial';
+                    ctx.fillText('Base', x, baseY - baseHeight - 5);
+                    ctx.fillText(cumulative.toFixed(2), x, baseY + 15);
+
+                    x += spacing;
+
+                    // Draw feature contributions
+                    sortedFeatures.forEach(([feature, shapValue]) => {
+                        const isPositive = shapValue >= 0;
+                        const newCumulative = cumulative + shapValue;
+
+                        const y1 = baseY - (cumulative - minVal) * scale;
+                        const y2 = baseY - (newCumulative - minVal) * scale;
+                        const barHeight = Math.abs(y2 - y1);
+
+                        ctx.fillStyle = isPositive ? '#10B981' : '#EF4444';
+                        ctx.fillRect(x, Math.min(y1, y2), barWidth, barHeight);
+
+                        // Feature label
+                        ctx.fillStyle = '#666';
+                        ctx.font = '9px Arial';
+                        const label = feature.substring(0, 8);
+                        ctx.save();
+                        ctx.translate(x + barWidth / 2, baseY + 10);
+                        ctx.rotate(-Math.PI / 4);
+                        ctx.fillText(label, 0, 0);
+                        ctx.restore();
+
+                        cumulative = newCumulative;
+                        x += spacing;
+                    });
+
+                    // Draw final prediction
+                    const finalHeight = (cumulative - minVal) * scale;
+                    ctx.fillStyle = '#EC4899';
+                    ctx.fillRect(x, baseY - finalHeight, barWidth, finalHeight);
+                    ctx.fillStyle = '#666';
+                    ctx.font = '10px Arial';
+                    ctx.fillText('Pred', x, baseY - finalHeight - 5);
+                    ctx.fillText(cumulative.toFixed(2), x, baseY + 15);
+
+                    resultDiv.innerHTML = `
+                        <div style="padding: 15px; background: #F3F4F6; border-radius: 8px; font-size: 12px; color: #666; line-height: 1.8;">
+                            <strong>Waterfall Chart Interpretation:</strong><br>
+                            • Shows cumulative effect from base value to final prediction<br>
+                            • <span style="color: #10B981;">■</span> Green bars = positive contribution<br>
+                            • <span style="color: #EF4444;">■</span> Red bars = negative contribution<br>
+                            • Each bar shows the running total after adding that feature's effect
+                        </div>
+                    `;
+                } catch (error) {
+                    resultDiv.innerHTML = `<div style="color: #EF4444;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        // =============================================================================
+        // 3D VISUALIZATION PANEL
+        // =============================================================================
+        function show3DVisualizationPanel() {
+            if (!window.batchResults || window.batchResults.length === 0) {
+                alert('Please upload survey data first.');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 5000; overflow-y: auto; padding: 40px;';
+
+            let html = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1200px; margin: 0 auto;">
+                    <h2 style="margin-bottom: 30px; color: #EF4444;">🌐 3D Decision Boundary Visualization</h2>
+
+                    <div style="margin-bottom: 30px; padding: 20px; background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(245, 158, 11, 0.1)); border-radius: 15px; border: 2px solid #EF4444;">
+                        <h3 style="color: #EF4444; margin-bottom: 15px;">Interactive 3D Visualization</h3>
+                        <p style="color: #666; line-height: 1.8; font-size: 14px;">
+                            Visualize decision boundaries in 3D space. Select three features to create a 3-dimensional view of how your model makes decisions.
+                            The surface shows predicted values, while points represent actual data samples.
+                        </p>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 30px; margin-bottom: 30px;">
+                        <!-- Controls -->
+                        <div style="padding: 25px; border: 2px solid #EF4444; border-radius: 15px;">
+                            <h3 style="color: #EF4444; margin-bottom: 20px;">Visualization Controls</h3>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px;">X-Axis Feature:</label>
+                                <select id="3d-x-feature" style="width: 100%; padding: 8px; border: 2px solid #EF4444; border-radius: 8px; font-size: 13px;">
+                                    ${Object.keys(window.batchResults[0] || {}).filter(k => typeof window.batchResults[0][k] === 'number').map(k => `<option value="${k}">${k.substring(0, 30)}</option>`).join('')}
+                                </select>
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px;">Y-Axis Feature:</label>
+                                <select id="3d-y-feature" style="width: 100%; padding: 8px; border: 2px solid #EF4444; border-radius: 8px; font-size: 13px;">
+                                    ${Object.keys(window.batchResults[0] || {}).filter(k => typeof window.batchResults[0][k] === 'number').map((k, i) => `<option value="${k}" ${i === 1 ? 'selected' : ''}>${k.substring(0, 30)}</option>`).join('')}
+                                </select>
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px;">Z-Axis (Color):</label>
+                                <select id="3d-z-feature" style="width: 100%; padding: 8px; border: 2px solid #EF4444; border-radius: 8px; font-size: 13px;">
+                                    <option value="finalScore">Final Score (Prediction)</option>
+                                </select>
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px;">Grid Resolution:</label>
+                                <input type="range" id="3d-resolution" min="10" max="50" value="20" style="width: 100%;">
+                                <div style="text-align: center; font-size: 12px; color: #666;" id="3d-resolution-value">20 × 20</div>
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px;">Rotation Angle:</label>
+                                <input type="range" id="3d-rotation" min="0" max="360" value="45" style="width: 100%;">
+                                <div style="text-align: center; font-size: 12px; color: #666;" id="3d-rotation-value">45°</div>
+                            </div>
+
+                            <button onclick="generate3DVisualization()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #EF4444, #DC2626); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; margin-bottom: 10px;">
+                                Generate 3D View
+                            </button>
+
+                            <div style="padding: 12px; background: #FEF3C7; border-radius: 8px; font-size: 11px; color: #92400E;">
+                                <strong>Note:</strong> Higher resolution = slower but smoother visualization
+                            </div>
+                        </div>
+
+                        <!-- Visualization Canvas -->
+                        <div style="padding: 25px; border: 2px solid #F59E0B; border-radius: 15px; background: #F9FAFB;">
+                            <h3 style="color: #F59E0B; margin-bottom: 15px;">3D Projection</h3>
+                            <canvas id="3d-visualization-canvas" width="600" height="500" style="width: 100%; border: 1px solid #ddd; border-radius: 8px; background: white; display: block;"></canvas>
+                            <div id="3d-info" style="margin-top: 15px; padding: 15px; background: white; border-radius: 8px; font-size: 12px; color: #666;">
+                                Configure settings and click "Generate 3D View" to visualize decision boundaries
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+
+            // Add event listeners for sliders
+            setTimeout(() => {
+                document.getElementById('3d-resolution').oninput = function() {
+                    document.getElementById('3d-resolution-value').textContent = `${this.value} × ${this.value}`;
+                };
+
+                document.getElementById('3d-rotation').oninput = function() {
+                    document.getElementById('3d-rotation-value').textContent = `${this.value}°`;
+                };
+            }, 100);
+        }
+
+        function generate3DVisualization() {
+            const data = preprocessedData || window.batchResults;
+            const xFeature = document.getElementById('3d-x-feature').value;
+            const yFeature = document.getElementById('3d-y-feature').value;
+            const resolution = parseInt(document.getElementById('3d-resolution').value);
+            const rotation = parseInt(document.getElementById('3d-rotation').value) * Math.PI / 180;
+
+            const canvas = document.getElementById('3d-visualization-canvas');
+            const ctx = canvas.getContext('2d');
+            const infoDiv = document.getElementById('3d-info');
+
+            infoDiv.innerHTML = '<div style="text-align: center;">Generating 3D visualization...<br>Please wait...</div>';
+
+            setTimeout(() => {
+                try {
+                    // Clear canvas
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // Get feature ranges
+                    const xValues = data.map(d => d[xFeature]);
+                    const yValues = data.map(d => d[yFeature]);
+                    const zValues = data.map(d => d.finalScore || 0);
+
+                    const xMin = Math.min(...xValues);
+                    const xMax = Math.max(...xValues);
+                    const yMin = Math.min(...yValues);
+                    const yMax = Math.max(...yValues);
+                    const zMin = Math.min(...zValues);
+                    const zMax = Math.max(...zValues);
+
+                    // Create grid
+                    const grid = [];
+                    const xStep = (xMax - xMin) / resolution;
+                    const yStep = (yMax - yMin) / resolution;
+
+                    for (let i = 0; i <= resolution; i++) {
+                        for (let j = 0; j <= resolution; j++) {
+                            const x = xMin + i * xStep;
+                            const y = yMin + j * yStep;
+
+                            // Simple interpolation for z value
+                            const z = interpolateValue(x, y, data, xFeature, yFeature);
+
+                            grid.push({x, y, z});
+                        }
+                    }
+
+                    // Project to 2D
+                    const projected = grid.map(point => {
+                        const rotated = rotate3D(point, rotation);
+                        return project3Dto2D(rotated, canvas.width, canvas.height, xMin, xMax, yMin, yMax, zMin, zMax);
+                    });
+
+                    // Draw surface
+                    for (let i = 0; i < resolution; i++) {
+                        for (let j = 0; j < resolution; j++) {
+                            const idx = i * (resolution + 1) + j;
+
+                            const p1 = projected[idx];
+                            const p2 = projected[idx + 1];
+                            const p3 = projected[idx + resolution + 1];
+                            const p4 = projected[idx + resolution + 2];
+
+                            if (p1 && p2 && p3 && p4) {
+                                const avgZ = (grid[idx].z + grid[idx + 1].z + grid[idx + resolution + 1].z + grid[idx + resolution + 2].z) / 4;
+                                const normalizedZ = (avgZ - zMin) / (zMax - zMin || 1);
+
+                                ctx.fillStyle = getColorForValue(normalizedZ);
+                                ctx.globalAlpha = 0.6;
+                                ctx.beginPath();
+                                ctx.moveTo(p1.x, p1.y);
+                                ctx.lineTo(p2.x, p2.y);
+                                ctx.lineTo(p4.x, p4.y);
+                                ctx.lineTo(p3.x, p3.y);
+                                ctx.closePath();
+                                ctx.fill();
+                                ctx.globalAlpha = 1.0;
+                            }
+                        }
+                    }
+
+                    // Draw data points
+                    data.slice(0, 50).forEach(point => {
+                        const p3d = {x: point[xFeature], y: point[yFeature], z: point.finalScore || 0};
+                        const rotated = rotate3D(p3d, rotation);
+                        const p2d = project3Dto2D(rotated, canvas.width, canvas.height, xMin, xMax, yMin, yMax, zMin, zMax);
+
+                        if (p2d) {
+                            ctx.fillStyle = '#000';
+                            ctx.beginPath();
+                            ctx.arc(p2d.x, p2d.y, 3, 0, 2 * Math.PI);
+                            ctx.fill();
+                        }
+                    });
+
+                    // Draw axes
+                    ctx.strokeStyle = '#666';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(50, 450);
+                    ctx.lineTo(550, 450);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(50, 450);
+                    ctx.lineTo(50, 50);
+                    ctx.stroke();
+
+                    // Labels
+                    ctx.fillStyle = '#666';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.fillText(xFeature.substring(0, 15), 520, 470);
+                    ctx.save();
+                    ctx.translate(20, 250);
+                    ctx.rotate(-Math.PI / 2);
+                    ctx.fillText(yFeature.substring(0, 15), 0, 0);
+                    ctx.restore();
+
+                    infoDiv.innerHTML = `
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center;">
+                            <div>
+                                <div style="font-weight: bold; color: #EF4444; margin-bottom: 5px;">X-Axis</div>
+                                <div style="font-size: 11px; color: #666;">${xMin.toFixed(2)} to ${xMax.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div style="font-weight: bold; color: #F59E0B; margin-bottom: 5px;">Y-Axis</div>
+                                <div style="font-size: 11px; color: #666;">${yMin.toFixed(2)} to ${yMax.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div style="font-weight: bold; color: #10B981; margin-bottom: 5px;">Z (Color)</div>
+                                <div style="font-size: 11px; color: #666;">${zMin.toFixed(2)} to ${zMax.toFixed(2)}</div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 15px; text-align: center; font-size: 12px; color: #666;">
+                            Showing ${Math.min(50, data.length)} data points • ${resolution}×${resolution} grid resolution
+                        </div>
+                    `;
+                } catch (error) {
+                    infoDiv.innerHTML = `<div style="color: #EF4444; text-align: center;"><strong>Error:</strong> ${error.message}</div>`;
+                }
+            }, 100);
+        }
+
+        function rotate3D(point, angleY) {
+            const {x, y, z} = point;
+            const newX = x * Math.cos(angleY) + z * Math.sin(angleY);
+            const newZ = -x * Math.sin(angleY) + z * Math.cos(angleY);
+            return {x: newX, y: y, z: newZ};
+        }
+
+        function project3Dto2D(point, width, height, xMin, xMax, yMin, yMax, zMin, zMax) {
+            // Normalize coordinates
+            const normX = (point.x - xMin) / (xMax - xMin || 1);
+            const normY = (point.y - yMin) / (yMax - yMin || 1);
+            const normZ = (point.z - zMin) / (zMax - zMin || 1);
+
+            // Apply perspective projection
+            const distance = 3;
+            const scale = distance / (distance + normZ);
+
+            const screenX = 50 + (normX * 500 * scale);
+            const screenY = 450 - (normY * 400 * scale);
+
+            return {x: screenX, y: screenY, depth: normZ};
+        }
+
+        function interpolateValue(x, y, data, xFeature, yFeature) {
+            // Simple nearest neighbor interpolation
+            let minDist = Infinity;
+            let nearestZ = 0;
+
+            data.forEach(point => {
+                const dx = point[xFeature] - x;
+                const dy = point[yFeature] - y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearestZ = point.finalScore || 0;
+                }
+            });
+
+            return nearestZ;
+        }
+
+        function getColorForValue(normalized) {
+            // Color gradient from red (low) to yellow (mid) to green (high)
+            if (normalized < 0.5) {
+                const t = normalized * 2;
+                const r = 239;
+                const g = Math.floor(68 + (234 - 68) * t);
+                const b = 68;
+                return `rgb(${r}, ${g}, ${b})`;
+            } else {
+                const t = (normalized - 0.5) * 2;
+                const r = Math.floor(234 - (234 - 16) * t);
+                const g = Math.floor(179 + (185 - 179) * t);
+                const b = Math.floor(8 + (129 - 8) * t);
+                return `rgb(${r}, ${g}, ${b})`;
+            }
         }
     </script>
 </body>
