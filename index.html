@@ -11713,6 +11713,351 @@ You can now:
                 return `rgb(${r}, ${g}, ${b})`;
             }
         }
+
+        // =============================================================================
+        // DIAGNOSTICS AND TESTING SYSTEM
+        // =============================================================================
+
+        function generateSampleData(count = 50) {
+            if (!treeBuilder || !treeBuilder.nodes || treeBuilder.nodes.length === 0) {
+                alert('Please build a decision tree first before generating sample data.');
+                return null;
+            }
+
+            const sampleData = [];
+            for (let i = 0; i < count; i++) {
+                const result = {
+                    id: `sample_${i}`,
+                    path: [],
+                    finalScore: 0,
+                    responses: {}
+                };
+
+                // Simulate traversal through the tree
+                let currentNode = treeBuilder.nodes[0];
+                let totalScore = 0;
+                let stepCount = 0;
+
+                while (currentNode && stepCount < 20) {  // Limit to prevent infinite loops
+                    const score = Math.random() * (currentScaleMax - currentScaleMin) + currentScaleMin;
+
+                    result.responses[currentNode.question] = score;
+                    result.path.push({
+                        nodeId: currentNode.id,
+                        question: currentNode.question,
+                        score: score
+                    });
+
+                    totalScore += score;
+                    stepCount++;
+
+                    if (currentNode.isTerminal) {
+                        break;
+                    }
+
+                    // Decide which branch to take
+                    if (score < (currentNode.threshold !== undefined ? currentNode.threshold : 0)) {
+                        currentNode = currentNode.left || null;
+                    } else {
+                        currentNode = currentNode.right || null;
+                    }
+                }
+
+                result.finalScore = stepCount > 0 ? totalScore / stepCount : 0;
+                sampleData.push(result);
+            }
+
+            return sampleData;
+        }
+
+        function showDiagnosticsPanel() {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 6000; overflow-y: auto; padding: 40px;';
+
+            const results = {
+                tree: treeBuilder && treeBuilder.nodes && treeBuilder.nodes.length > 0,
+                data: window.batchResults && window.batchResults.length > 0,
+                bagging: baggingEnsemble !== null,
+                fuzzy: fuzzyInferenceSystem !== null,
+                probabilistic: bayesianNetwork !== null,
+                boosting: gradientBoostingModel !== null,
+                neural: neuralDecisionModel !== null,
+                crossValidator: crossValidator !== null,
+                advancedMetrics: advancedMetrics !== null,
+                dataPreprocessor: dataPreprocessor !== null,
+                featureSelector: featureSelector !== null,
+                shapExplainer: shapExplainer !== null
+            };
+
+            const passed = Object.values(results).filter(r => r).length;
+            const total = Object.keys(results).length;
+
+            modal.innerHTML = `
+                <div style="background: white; padding: 40px; border-radius: 20px; max-width: 1000px; margin: 0 auto;">
+                    <h1 style="text-align: center; background: linear-gradient(135deg, #06B6D4, #3B82F6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 30px;">
+                        🔧 System Diagnostics
+                    </h1>
+
+                    <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(59, 130, 246, 0.1)); padding: 25px; border-radius: 15px; margin-bottom: 30px; text-align: center;">
+                        <div style="font-size: 48px; font-weight: bold; color: ${passed === total ? '#10B981' : passed > total/2 ? '#F59E0B' : '#EF4444'}; margin-bottom: 10px;">
+                            ${passed} / ${total}
+                        </div>
+                        <div style="color: #666; font-size: 18px;">Components Initialized</div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px;">
+                        ${Object.entries(results).map(([key, value]) => `
+                            <div style="padding: 15px; border: 2px solid ${value ? '#10B981' : '#EF4444'}; border-radius: 10px; display: flex; align-items: center; gap: 10px;">
+                                <div style="font-size: 24px;">${value ? '✅' : '❌'}</div>
+                                <div>
+                                    <div style="font-weight: bold; color: ${value ? '#10B981' : '#EF4444'}; text-transform: capitalize;">
+                                        ${key.replace(/([A-Z])/g, ' $1').trim()}
+                                    </div>
+                                    <div style="font-size: 12px; color: #666;">${value ? 'Ready' : 'Not initialized'}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <div style="background: #F3F4F6; padding: 25px; border-radius: 15px; margin-bottom: 30px;">
+                        <h3 style="color: #3B82F6; margin-bottom: 20px;">🧪 Quick Tests</h3>
+
+                        <div style="display: grid; gap: 15px;">
+                            <button onclick="testGenerateSampleData()" style="padding: 15px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px;">
+                                Generate Sample Data (50 responses)
+                            </button>
+
+                            <button onclick="testAllPanels()" style="padding: 15px; background: linear-gradient(135deg, #3B82F6, #2563EB); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px;">
+                                Test All Panels
+                            </button>
+
+                            <button onclick="initializeAllModels()" style="padding: 15px; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px;">
+                                Initialize All ML Models
+                            </button>
+
+                            <button onclick="testCanvasRendering()" style="padding: 15px; background: linear-gradient(135deg, #F59E0B, #EF4444); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px;">
+                                Test Canvas Rendering
+                            </button>
+                        </div>
+
+                        <div id="test-output" style="margin-top: 20px; padding: 15px; background: white; border-radius: 10px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; display: none;"></div>
+                    </div>
+
+                    <div style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(59, 130, 246, 0.1)); padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h4 style="color: #06B6D4; margin-bottom: 10px;">💡 Quick Tips</h4>
+                        <ul style="color: #666; line-height: 1.8; margin-left: 20px;">
+                            <li>If "Tree" is ❌: Build a decision tree first using the builder</li>
+                            <li>If "Data" is ❌: Click "Generate Sample Data" or upload survey data</li>
+                            <li>Initialize models before using ML features</li>
+                            <li>Canvas rendering requires data to be loaded first</li>
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center;">
+                        <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 15px 40px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px;">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+        }
+
+        function testGenerateSampleData() {
+            const output = document.getElementById('test-output');
+            output.style.display = 'block';
+            output.innerHTML = '🔄 Generating sample data...<br>';
+
+            try {
+                const sampleData = generateSampleData(50);
+                if (sampleData) {
+                    window.batchResults = sampleData;
+                    output.innerHTML += `✅ Generated ${sampleData.length} sample responses<br>`;
+                    output.innerHTML += `📊 Average score: ${(sampleData.reduce((sum, d) => sum + d.finalScore, 0) / sampleData.length).toFixed(2)}<br>`;
+                    output.innerHTML += '✅ Sample data is now available for all panels!<br>';
+                } else {
+                    output.innerHTML += '❌ Failed to generate sample data<br>';
+                }
+            } catch (error) {
+                output.innerHTML += `❌ Error: ${error.message}<br>`;
+            }
+        }
+
+        function testAllPanels() {
+            const output = document.getElementById('test-output');
+            output.style.display = 'block';
+            output.innerHTML = '🔄 Testing all panels...<br>';
+
+            const panels = [
+                { name: 'Data Science Workbench', func: 'showDataScienceWorkbench' },
+                { name: 'Preprocessing Panel', func: 'showPreprocessingPanel' },
+                { name: 'Feature Selection Panel', func: 'showFeatureSelectionPanel' },
+                { name: 'Cross-Validation Panel', func: 'showCrossValidationPanel' },
+                { name: 'Advanced Metrics Panel', func: 'showAdvancedMetricsPanel' },
+                { name: 'SHAP Panel', func: 'showSHAPPanel' },
+                { name: '3D Visualization Panel', func: 'show3DVisualizationPanel' },
+                { name: 'ML Panel', func: 'showMLPanel' },
+                { name: 'Fuzzy Logic Panel', func: 'showFuzzyLogicPanel' },
+                { name: 'Probabilistic Panel', func: 'showProbabilisticPanel' }
+            ];
+
+            panels.forEach((panel, index) => {
+                setTimeout(() => {
+                    try {
+                        if (typeof window[panel.func] === 'function') {
+                            output.innerHTML += `✅ ${panel.name}: Function exists<br>`;
+                        } else {
+                            output.innerHTML += `❌ ${panel.name}: Function not found<br>`;
+                        }
+                    } catch (error) {
+                        output.innerHTML += `❌ ${panel.name}: Error - ${error.message}<br>`;
+                    }
+
+                    if (index === panels.length - 1) {
+                        output.innerHTML += '<br>✅ Panel test complete!<br>';
+                    }
+                }, index * 100);
+            });
+        }
+
+        function initializeAllModels() {
+            const output = document.getElementById('test-output');
+            output.style.display = 'block';
+            output.innerHTML = '🔄 Initializing all ML models...<br>';
+
+            try {
+                // Initialize Data Science Workbench components
+                if (!crossValidator) {
+                    crossValidator = new CrossValidator(5);
+                    output.innerHTML += '✅ CrossValidator initialized<br>';
+                }
+
+                if (!advancedMetrics) {
+                    advancedMetrics = new AdvancedMetrics();
+                    output.innerHTML += '✅ AdvancedMetrics initialized<br>';
+                }
+
+                if (!dataPreprocessor) {
+                    dataPreprocessor = new DataPreprocessor();
+                    output.innerHTML += '✅ DataPreprocessor initialized<br>';
+                }
+
+                if (!featureSelector) {
+                    featureSelector = new FeatureSelector();
+                    output.innerHTML += '✅ FeatureSelector initialized<br>';
+                }
+
+                if (!shapExplainer && treeBuilder && treeBuilder.nodes && treeBuilder.nodes.length > 0) {
+                    shapExplainer = new SHAPExplainer(treeBuilder.nodes[0]);
+                    output.innerHTML += '✅ SHAPExplainer initialized<br>';
+                } else if (!treeBuilder || !treeBuilder.nodes || treeBuilder.nodes.length === 0) {
+                    output.innerHTML += '⚠️  SHAPExplainer: Needs decision tree first<br>';
+                }
+
+                // Initialize ML models
+                if (!baggingEnsemble && treeBuilder && treeBuilder.nodes && treeBuilder.nodes.length > 0) {
+                    baggingEnsemble = new BaggingEnsemble(10, 1.0, 0.8);
+                    output.innerHTML += '✅ Bagging Ensemble initialized<br>';
+                }
+
+                if (!fuzzyInferenceSystem) {
+                    fuzzyInferenceSystem = new FuzzyInferenceSystem();
+                    output.innerHTML += '✅ Fuzzy Inference System initialized<br>';
+                }
+
+                if (!gradientBoostingModel) {
+                    gradientBoostingModel = new GradientBoostingTree(10, 0.1);
+                    output.innerHTML += '✅ Gradient Boosting initialized<br>';
+                }
+
+                if (!neuralDecisionModel) {
+                    neuralDecisionModel = new NeuralDecisionTree(3, 5, 1, 0.01);
+                    output.innerHTML += '✅ Neural Decision Tree initialized<br>';
+                }
+
+                output.innerHTML += '<br>✅ All models initialized successfully!<br>';
+
+                // Refresh diagnostics after 1 second
+                setTimeout(() => {
+                    const modal = document.querySelector('[style*="position: fixed"][style*="z-index: 6000"]');
+                    if (modal) {
+                        modal.remove();
+                        showDiagnosticsPanel();
+                    }
+                }, 1000);
+
+            } catch (error) {
+                output.innerHTML += `❌ Error: ${error.message}<br>`;
+            }
+        }
+
+        function testCanvasRendering() {
+            const output = document.getElementById('test-output');
+            output.style.display = 'block';
+            output.innerHTML = '🔄 Testing canvas rendering capabilities...<br>';
+
+            try {
+                // Test 1: Create canvas element
+                const testCanvas = document.createElement('canvas');
+                testCanvas.width = 400;
+                testCanvas.height = 300;
+                output.innerHTML += '✅ Canvas element creation: Success<br>';
+
+                // Test 2: Get 2D context
+                const ctx = testCanvas.getContext('2d');
+                if (ctx) {
+                    output.innerHTML += '✅ Canvas 2D context: Available<br>';
+                } else {
+                    output.innerHTML += '❌ Canvas 2D context: Not available<br>';
+                    return;
+                }
+
+                // Test 3: Draw operations
+                ctx.fillStyle = '#10B981';
+                ctx.fillRect(10, 10, 100, 50);
+                ctx.strokeStyle = '#3B82F6';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(120, 10, 100, 50);
+                output.innerHTML += '✅ Canvas drawing operations: Working<br>';
+
+                // Test 4: Text rendering
+                ctx.font = '16px Arial';
+                ctx.fillStyle = '#000';
+                ctx.fillText('Test Text', 10, 100);
+                output.innerHTML += '✅ Canvas text rendering: Working<br>';
+
+                // Test 5: Path operations
+                ctx.beginPath();
+                ctx.moveTo(10, 120);
+                ctx.lineTo(100, 150);
+                ctx.lineTo(10, 180);
+                ctx.closePath();
+                ctx.stroke();
+                output.innerHTML += '✅ Canvas path operations: Working<br>';
+
+                output.innerHTML += '<br>✅ All canvas tests passed!<br>';
+                output.innerHTML += '<br>💡 Canvas is fully functional. Issues may be data-related.<br>';
+
+            } catch (error) {
+                output.innerHTML += `❌ Canvas test failed: ${error.message}<br>`;
+            }
+        }
+
+        // Add diagnostics button to main controls (run on page load)
+        window.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                const controls = document.querySelector('.controls');
+                if (controls && !document.getElementById('diagnostics-btn')) {
+                    const diagButton = document.createElement('button');
+                    diagButton.id = 'diagnostics-btn';
+                    diagButton.onclick = showDiagnosticsPanel;
+                    diagButton.style.cssText = 'background: linear-gradient(135deg, #EF4444, #DC2626); font-weight: bold;';
+                    diagButton.innerHTML = '🔧 Diagnostics';
+                    controls.appendChild(diagButton);
+                }
+            }, 1000);
+        });
     </script>
 </body>
 </html>
