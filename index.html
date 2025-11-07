@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Decision Tree Builder - Tanh Style Scoring</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <meta name="description" content="Advanced Decision Tree Builder with ML, Fuzzy Logic, and Statistical Analysis">
+    <meta name="theme-color" content="#0039A6">
+    <title>Decision Tree Builder - Advanced ML & Analytics</title>
     <style>
         :root {
             /* GSU Official Brand Colors 2025 */
@@ -19,6 +21,41 @@
             --gsu-blue-dark: #002d85;
             --gsu-success: #10B981;
             --gsu-warning: #F59E0B;
+
+            /* Enhanced Theme Variables */
+            --spacing-xs: 4px;
+            --spacing-sm: 8px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            --spacing-xl: 32px;
+
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+
+            --shadow-sm: 0 2px 8px rgba(0, 57, 166, 0.1);
+            --shadow-md: 0 4px 16px rgba(0, 57, 166, 0.15);
+            --shadow-lg: 0 10px 30px rgba(0, 57, 166, 0.2);
+            --shadow-xl: 0 20px 40px rgba(0, 57, 166, 0.25);
+
+            --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-base: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+
+            --font-size-xs: 0.75rem;
+            --font-size-sm: 0.875rem;
+            --font-size-base: 1rem;
+            --font-size-lg: 1.125rem;
+            --font-size-xl: 1.25rem;
+            --font-size-2xl: 1.5rem;
+            --font-size-3xl: 2rem;
+
+            --z-base: 1;
+            --z-dropdown: 1000;
+            --z-sticky: 1100;
+            --z-modal: 2000;
+            --z-tooltip: 3000;
         }
 
         * {
@@ -78,11 +115,120 @@
             max-width: 1400px;
             width: 100%;
             background: rgba(255, 255, 255, 0.98);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 20px 40px rgba(0, 57, 166, 0.12);
+            border-radius: var(--radius-xl);
+            padding: var(--spacing-xl);
+            box-shadow: var(--shadow-xl);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: var(--transition-base);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .container {
+                padding: var(--spacing-md);
+                border-radius: var(--radius-md);
+            }
+
+            h1 {
+                font-size: var(--font-size-2xl);
+            }
+
+            .controls {
+                flex-direction: column;
+                gap: var(--spacing-sm);
+            }
+
+            .builder-panel {
+                width: 100%;
+                right: 0;
+                left: 0;
+                bottom: 0;
+                top: auto;
+                max-height: 60vh;
+                border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #tree-container {
+                height: 400px;
+            }
+
+            body {
+                padding: var(--spacing-sm);
+            }
+        }
+
+        /* Accessibility Improvements */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+
+        button:focus-visible,
+        input:focus-visible,
+        select:focus-visible {
+            outline: 3px solid var(--gsu-vibrant);
+            outline-offset: 2px;
+        }
+
+        /* Reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        /* Loading States */
+        .loading {
+            position: relative;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid var(--gsu-primary);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Error States */
+        .error {
+            border-color: var(--gsu-accent) !important;
+            background-color: rgba(204, 0, 0, 0.05) !important;
+        }
+
+        .error-message {
+            color: var(--gsu-accent);
+            font-size: var(--font-size-sm);
+            margin-top: var(--spacing-xs);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-xs);
         }
 
         h1 {
@@ -636,15 +782,31 @@
     </div>
 
     <script>
-        // Step 1: Enhanced Decision Node class for research survey
+        // Enhanced Decision Node class with improved math and validation
         class DecisionNode {
+            /**
+             * Decision Node for tree-based survey analysis
+             * @param {string} question - The survey question text
+             * @param {number} depth - Node depth in tree (0 = root)
+             * @param {string|null} id - Unique identifier (auto-generated if null)
+             * @param {number} threshold - Decision threshold value
+             * @param {number} score - Default/assigned score
+             */
             constructor(question, depth = 0, id = null, threshold = 0, score = 0) {
+                // Input validation
+                if (typeof question !== 'string' || question.trim().length === 0) {
+                    throw new Error('Question must be a non-empty string');
+                }
+                if (!Number.isFinite(depth) || depth < 0) {
+                    throw new Error('Depth must be a non-negative number');
+                }
+
                 this.id = id || `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                this.question = question;
-                this.depth = depth;
-                this.threshold = threshold;
-                this.thresholdMode = 'manual'; // 'manual', 'mean', 'median', 'percentile'
-                this.score = score;
+                this.question = question.trim();
+                this.depth = Math.floor(depth);
+                this.threshold = this._validateNumber(threshold, 'threshold');
+                this.thresholdMode = 'manual'; // 'manual', 'mean', 'median', 'percentile', 'auto'
+                this.score = this._validateNumber(score, 'score');
                 this.isTerminal = false;
                 this.x = 0;
                 this.y = 0;
@@ -654,23 +816,195 @@
                 this.right = null;
                 this.rightId = null;
                 this.userScore = null;
+
+                // Statistics tracking
+                this.statistics = {
+                    visitCount: 0,
+                    scoreSum: 0,
+                    scoreSquaredSum: 0,
+                    scores: [],
+                    lastUpdated: null
+                };
             }
 
-            evaluate() {
-                const userInput = prompt(`${this.question}\nEnter score (-5 to 5):`);
-                const userScore = parseFloat(userInput);
-                if (isNaN(userScore) || userScore < -5 || userScore > 5) {
-                    alert('Invalid score');
-                    return null;
+            /**
+             * Validates and cleans numeric input with precision handling
+             * @private
+             */
+            _validateNumber(value, fieldName = 'value') {
+                if (!Number.isFinite(value)) {
+                    console.warn(`${fieldName} is not finite, using 0`);
+                    return 0;
                 }
-                this.userScore = userScore;
-                return userScore >= this.threshold;
+                // Prevent floating point errors - round to 10 decimal places
+                return Math.round(value * 1e10) / 1e10;
             }
 
+            /**
+             * Record a score for statistical analysis
+             * @param {number} score - Score to record
+             */
+            recordScore(score) {
+                const validScore = this._validateNumber(score, 'recorded score');
+                this.statistics.visitCount++;
+                this.statistics.scoreSum += validScore;
+                this.statistics.scoreSquaredSum += validScore * validScore;
+                this.statistics.scores.push(validScore);
+                this.statistics.lastUpdated = Date.now();
+
+                // Keep only last 1000 scores to prevent memory issues
+                if (this.statistics.scores.length > 1000) {
+                    const removed = this.statistics.scores.shift();
+                    this.statistics.scoreSum -= removed;
+                    this.statistics.scoreSquaredSum -= removed * removed;
+                }
+            }
+
+            /**
+             * Calculate mean score from statistics
+             * @returns {number} Mean score or 0 if no data
+             */
+            getMeanScore() {
+                if (this.statistics.visitCount === 0) return 0;
+                return this._validateNumber(
+                    this.statistics.scoreSum / this.statistics.visitCount
+                );
+            }
+
+            /**
+             * Calculate standard deviation
+             * @returns {number} Standard deviation or 0 if insufficient data
+             */
+            getStdDev() {
+                if (this.statistics.visitCount < 2) return 0;
+                const mean = this.getMeanScore();
+                const variance = (this.statistics.scoreSquaredSum / this.statistics.visitCount)
+                                - (mean * mean);
+                return Math.sqrt(Math.max(0, variance)); // Prevent negative due to floating point
+            }
+
+            /**
+             * Calculate median score
+             * @returns {number} Median score or 0 if no data
+             */
+            getMedianScore() {
+                if (this.statistics.scores.length === 0) return 0;
+                const sorted = [...this.statistics.scores].sort((a, b) => a - b);
+                const mid = Math.floor(sorted.length / 2);
+                return sorted.length % 2 === 0
+                    ? (sorted[mid - 1] + sorted[mid]) / 2
+                    : sorted[mid];
+            }
+
+            /**
+             * Get percentile value
+             * @param {number} percentile - Percentile to calculate (0-100)
+             * @returns {number} Percentile value
+             */
+            getPercentile(percentile = 75) {
+                if (this.statistics.scores.length === 0) return 0;
+                const sorted = [...this.statistics.scores].sort((a, b) => a - b);
+                const index = Math.ceil((percentile / 100) * sorted.length) - 1;
+                return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
+            }
+
+            /**
+             * Update threshold based on mode
+             * @param {string} mode - Threshold calculation mode
+             */
+            updateThreshold(mode = this.thresholdMode) {
+                this.thresholdMode = mode;
+
+                switch (mode) {
+                    case 'mean':
+                        this.threshold = this.getMeanScore();
+                        break;
+                    case 'median':
+                        this.threshold = this.getMedianScore();
+                        break;
+                    case 'percentile':
+                        this.threshold = this.getPercentile(75);
+                        break;
+                    case 'auto':
+                        // Auto mode: Use mean + 0.5 * std dev for better separation
+                        this.threshold = this.getMeanScore() + (0.5 * this.getStdDev());
+                        break;
+                    case 'manual':
+                    default:
+                        // Manual mode - don't change threshold
+                        break;
+                }
+
+                this.threshold = this._validateNumber(this.threshold);
+            }
+
+            /**
+             * Evaluate user input with validation
+             * @param {number} userScore - User's score input
+             * @returns {boolean} True if score >= threshold
+             */
+            evaluate(userScore = null) {
+                if (userScore === null) {
+                    // Legacy prompt support
+                    const userInput = prompt(`${this.question}\nEnter score (${currentScaleMin} to ${currentScaleMax}):`);
+                    if (userInput === null) return null; // User cancelled
+                    userScore = parseFloat(userInput);
+                }
+
+                // Validate input
+                if (!Number.isFinite(userScore)) {
+                    throw new Error('Score must be a valid number');
+                }
+
+                const minScore = typeof currentScaleMin !== 'undefined' ? currentScaleMin : -5;
+                const maxScore = typeof currentScaleMax !== 'undefined' ? currentScaleMax : 5;
+
+                if (userScore < minScore || userScore > maxScore) {
+                    throw new Error(`Score must be between ${minScore} and ${maxScore}`);
+                }
+
+                this.userScore = this._validateNumber(userScore);
+                this.recordScore(this.userScore);
+
+                return this.userScore >= this.threshold;
+            }
+
+            /**
+             * Get color based on score with improved color interpolation
+             * @returns {string} Color value
+             */
             getColor() {
                 const s = this.userScore !== null ? this.userScore : this.score;
-                // Use adaptive color scale
-                return getColorForValue(s, currentColorScale);
+                // Use adaptive color scale with validation
+                if (typeof getColorForValue === 'function') {
+                    return getColorForValue(s, currentColorScale);
+                }
+                // Fallback color
+                return '#0039A6';
+            }
+
+            /**
+             * Serialize node for export
+             * @returns {object} Serialized node data
+             */
+            toJSON() {
+                return {
+                    id: this.id,
+                    question: this.question,
+                    depth: this.depth,
+                    threshold: this.threshold,
+                    thresholdMode: this.thresholdMode,
+                    score: this.score,
+                    isTerminal: this.isTerminal,
+                    leftId: this.leftId,
+                    rightId: this.rightId,
+                    statistics: {
+                        visitCount: this.statistics.visitCount,
+                        meanScore: this.getMeanScore(),
+                        stdDev: this.getStdDev(),
+                        medianScore: this.getMedianScore()
+                    }
+                };
             }
         }
 
