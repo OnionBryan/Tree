@@ -3145,15 +3145,43 @@
                 return matrix;
             }
 
-            // Matthews Correlation Coefficient
+            /**
+             * Matthews Correlation Coefficient
+             * Balanced measure for binary classification, even with imbalanced classes
+             * @param {number} tp - True positives
+             * @param {number} tn - True negatives
+             * @param {number} fp - False positives
+             * @param {number} fn - False negatives
+             * @returns {number} MCC value [-1, 1]
+             */
             calculateMCC(tp, tn, fp, fn) {
                 const numerator = (tp * tn) - (fp * fn);
                 const denominator = Math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn));
-                return denominator === 0 ? 0 : numerator / denominator;
+
+                // Handle edge cases
+                if (denominator === 0 || !Number.isFinite(denominator)) {
+                    return 0;
+                }
+
+                const mcc = numerator / denominator;
+
+                // Clamp to valid range
+                return Math.max(-1, Math.min(1, mcc));
             }
 
-            // Cohen's Kappa
+            /**
+             * Cohen's Kappa coefficient
+             * Measures inter-rater agreement, accounting for chance agreement
+             * @param {Array} predictions - Predicted values
+             * @param {Array} actuals - Actual values
+             * @returns {number} Kappa value [-1, 1]
+             */
             calculateKappa(predictions, actuals) {
+                if (!predictions || !actuals || predictions.length !== actuals.length || predictions.length === 0) {
+                    console.warn('Kappa requires equal-length non-empty arrays');
+                    return 0;
+                }
+
                 const n = predictions.length;
                 const observed = predictions.filter((p, i) => p === actuals[i]).length / n;
 
@@ -3167,7 +3195,15 @@
                     expected += (predCounts[key] / n) * ((actualCounts[key] || 0) / n);
                 });
 
-                return (observed - expected) / (1 - expected);
+                // Prevent division by zero
+                if (expected >= 1) {
+                    return 0;  // Perfect chance agreement
+                }
+
+                const kappa = (observed - expected) / (1 - expected);
+
+                // Clamp to valid range
+                return Math.max(-1, Math.min(1, kappa));
             }
         }
 
@@ -3304,7 +3340,13 @@
                 return imputed;
             }
 
-            // Missing Value Imputation - KNN
+            /**
+             * Missing Value Imputation using K-Nearest Neighbors
+             * @param {Array} data - Dataset
+             * @param {Array<string>} features - Features to impute
+             * @param {number} k - Number of neighbors
+             * @returns {Array} Imputed dataset
+             */
             imputeKNN(data, features, k = 5) {
                 const imputed = data.map(row => ({...row}));
 
@@ -3313,8 +3355,26 @@
                         if (row[feature] === null || row[feature] === undefined || isNaN(row[feature])) {
                             // Find k nearest neighbors with non-missing values
                             const neighbors = this.findKNearestNeighbors(data, idx, feature, k);
-                            const neighborValues = neighbors.map(n => n[feature]);
-                            row[feature] = neighborValues.reduce((a, b) => a + b, 0) / neighborValues.length;
+
+                            if (neighbors.length > 0) {
+                                const neighborValues = neighbors.map(n => n[feature]).filter(v => Number.isFinite(v));
+
+                                if (neighborValues.length > 0) {
+                                    row[feature] = neighborValues.reduce((a, b) => a + b, 0) / neighborValues.length;
+                                } else {
+                                    // Fallback to overall mean
+                                    const allValues = data.map(r => r[feature]).filter(v => Number.isFinite(v));
+                                    row[feature] = allValues.length > 0
+                                        ? allValues.reduce((a, b) => a + b, 0) / allValues.length
+                                        : 0;
+                                }
+                            } else {
+                                // No neighbors found, use mean
+                                const allValues = data.map(r => r[feature]).filter(v => Number.isFinite(v));
+                                row[feature] = allValues.length > 0
+                                    ? allValues.reduce((a, b) => a + b, 0) / allValues.length
+                                    : 0;
+                            }
                         }
                     });
                 });
@@ -3372,22 +3432,49 @@
                 return outliers;
             }
 
-            // Helper methods
+            /**
+             * Calculate median of sorted array
+             * @param {Array<number>} sortedValues - Pre-sorted array
+             * @returns {number} Median value
+             */
             calculateMedian(sortedValues) {
+                if (!sortedValues || sortedValues.length === 0) return 0;
+
                 const mid = Math.floor(sortedValues.length / 2);
                 return sortedValues.length % 2 === 0
                     ? (sortedValues[mid - 1] + sortedValues[mid]) / 2
                     : sortedValues[mid];
             }
 
+            /**
+             * Calculate percentile using linear interpolation
+             * @param {Array<number>} sortedValues - Pre-sorted array
+             * @param {number} percentile - Percentile to calculate (0-100)
+             * @returns {number} Percentile value
+             */
             calculatePercentile(sortedValues, percentile) {
+                if (!sortedValues || sortedValues.length === 0) return 0;
+                if (sortedValues.length === 1) return sortedValues[0];
+
+                // Clamp percentile to valid range
+                percentile = Math.max(0, Math.min(100, percentile));
+
                 const index = (percentile / 100) * (sortedValues.length - 1);
                 const lower = Math.floor(index);
                 const upper = Math.ceil(index);
                 const weight = index % 1;
+
                 return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
             }
 
+            /**
+             * Find K nearest neighbors for KNN imputation
+             * @param {Array} data - Full dataset
+             * @param {number} targetIdx - Index of target row
+             * @param {string} feature - Feature to exclude from distance calculation
+             * @param {number} k - Number of neighbors
+             * @returns {Array} K nearest neighbor rows
+             */
             findKNearestNeighbors(data, targetIdx, feature, k) {
                 const distances = data
                     .map((row, idx) => ({
@@ -3398,6 +3485,12 @@
                     .filter(d => d.row[feature] !== null && d.row[feature] !== undefined && !isNaN(d.row[feature]))
                     .sort((a, b) => a.distance - b.distance)
                     .slice(0, k);
+
+                // Fallback if not enough neighbors found
+                if (distances.length === 0) {
+                    console.warn(`No valid neighbors found for feature ${feature}`);
+                    return [];
+                }
 
                 return distances.map(d => d.row);
             }
@@ -3494,8 +3587,24 @@
                 };
             }
 
-            // Calculate Pearson correlation
+            /**
+             * Calculate Pearson correlation coefficient
+             * Measures linear relationship between two variables
+             * @param {Array<number>} x - First variable values
+             * @param {Array<number>} y - Second variable values
+             * @returns {number} Correlation coefficient [-1, 1]
+             */
             calculateCorrelation(x, y) {
+                // Input validation
+                if (!Array.isArray(x) || !Array.isArray(y)) {
+                    console.warn('Correlation requires arrays');
+                    return 0;
+                }
+                if (x.length !== y.length || x.length === 0) {
+                    console.warn('Correlation requires equal-length non-empty arrays');
+                    return 0;
+                }
+
                 const n = x.length;
                 const meanX = x.reduce((a, b) => a + b, 0) / n;
                 const meanY = y.reduce((a, b) => a + b, 0) / n;
@@ -3512,7 +3621,16 @@
                     denomY += dy * dy;
                 }
 
-                return numerator / Math.sqrt(denomX * denomY);
+                // Prevent division by zero
+                const denominator = Math.sqrt(denomX * denomY);
+                if (denominator === 0 || !Number.isFinite(denominator)) {
+                    return 0;  // No correlation when variance is zero
+                }
+
+                const correlation = numerator / denominator;
+
+                // Clamp to valid range due to floating point errors
+                return Math.max(-1, Math.min(1, correlation));
             }
 
             // Calculate Mutual Information (simplified)
@@ -3541,12 +3659,30 @@
                 return mi;
             }
 
+            /**
+             * Discretize continuous values into bins
+             * @param {Array<number>} values - Continuous values
+             * @param {number} bins - Number of bins
+             * @returns {Array<number>} Bin indices
+             */
             discretize(values, bins) {
+                if (!values || values.length === 0) return [];
+
                 const min = Math.min(...values);
                 const max = Math.max(...values);
+
+                // Handle case where all values are identical
+                if (max === min) {
+                    return new Array(values.length).fill(0);
+                }
+
                 const binSize = (max - min) / bins;
 
-                return values.map(v => Math.min(Math.floor((v - min) / binSize), bins - 1));
+                return values.map(v => {
+                    const bin = Math.floor((v - min) / binSize);
+                    // Clamp to valid range
+                    return Math.max(0, Math.min(bins - 1, bin));
+                });
             }
 
             calculateProbabilities(binnedValues) {
@@ -3840,22 +3976,44 @@
             return '#999999';
         }
 
-        // Interpolate between two hex colors
+        /**
+         * Interpolate between two hex colors
+         * @param {string} color1 - Start color (hex)
+         * @param {string} color2 - End color (hex)
+         * @param {number} t - Interpolation factor [0, 1]
+         * @returns {string} Interpolated color (hex)
+         */
         function interpolateColor(color1, color2, t) {
+            // Clamp t to valid range
+            t = Math.max(0, Math.min(1, t));
+
             // Convert hex to RGB
             const c1 = hexToRgb(color1);
             const c2 = hexToRgb(color2);
-            
+
+            // Handle invalid colors
+            if (!c1 || !c2) {
+                console.warn('Invalid color format');
+                return color1 || '#999999';
+            }
+
             // Interpolate
             const r = Math.round(c1.r + (c2.r - c1.r) * t);
             const g = Math.round(c1.g + (c2.g - c1.g) * t);
             const b = Math.round(c1.b + (c2.b - c1.b) * t);
-            
+
             // Convert back to hex
             return rgbToHex(r, g, b);
         }
 
+        /**
+         * Convert hex color to RGB object
+         * @param {string} hex - Hex color code
+         * @returns {Object|null} RGB object or null if invalid
+         */
         function hexToRgb(hex) {
+            if (!hex || typeof hex !== 'string') return null;
+
             const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
             return result ? {
                 r: parseInt(result[1], 16),
@@ -3864,7 +4022,19 @@
             } : null;
         }
 
+        /**
+         * Convert RGB to hex color
+         * @param {number} r - Red (0-255)
+         * @param {number} g - Green (0-255)
+         * @param {number} b - Blue (0-255)
+         * @returns {string} Hex color code
+         */
         function rgbToHex(r, g, b) {
+            // Clamp values to valid range
+            r = Math.max(0, Math.min(255, Math.round(r)));
+            g = Math.max(0, Math.min(255, Math.round(g)));
+            b = Math.max(0, Math.min(255, Math.round(b)));
+
             return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
         }
 
