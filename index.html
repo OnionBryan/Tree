@@ -2400,18 +2400,45 @@
         // =============================================================================
         // GRADIENT BOOSTING SYSTEM
         // =============================================================================
+
+        /**
+         * GradientBoostingTree - Ensemble method using gradient descent
+         * Builds sequential trees to minimize residuals
+         * @class
+         */
         class GradientBoostingTree {
+            /**
+             * @param {number} numTrees - Number of sequential trees
+             * @param {number} learningRate - Step size shrinkage (0.0-1.0)
+             * @param {number} maxDepth - Maximum tree depth
+             */
             constructor(numTrees = 50, learningRate = 0.1, maxDepth = 3) {
-                this.numTrees = numTrees;
+                if (numTrees < 1 || numTrees > 1000) {
+                    console.warn('numTrees should be 1-1000, using default 50');
+                    numTrees = 50;
+                }
+                if (learningRate <= 0 || learningRate > 1) {
+                    console.warn('learningRate should be 0-1, using default 0.1');
+                    learningRate = 0.1;
+                }
+
+                this.numTrees = Math.floor(numTrees);
                 this.learningRate = learningRate;
-                this.maxDepth = maxDepth;
+                this.maxDepth = Math.max(1, Math.floor(maxDepth));
                 this.trees = [];
                 this.initialPrediction = 0;
+                this.trainingHistory = [];
             }
 
-            // Train gradient boosting model
+            /**
+             * Train gradient boosting model with styled console output
+             * @param {Array} data - Training data
+             * @param {Object} treeTemplate - Template tree structure
+             */
             train(data, treeTemplate) {
-                console.log(`Training gradient boosting with ${this.numTrees} trees...`);
+                this._logBrand('🚀 Training Gradient Boosting', 'primary');
+                console.log(`%c├─ Trees: ${this.numTrees} | Learning Rate: ${this.learningRate} | Max Depth: ${this.maxDepth}`,
+                    'color: #00AEEF; font-weight: normal;');
 
                 // Initialize with mean of targets
                 const targets = data.map(d => d.finalScore || d.score || 0);
@@ -2440,10 +2467,37 @@
 
                     // Calculate current loss
                     const loss = residuals.reduce((sum, r) => sum + r * r, 0) / residuals.length;
-                    console.log(`Tree ${i + 1}/${this.numTrees}, Loss: ${loss.toFixed(4)}`);
+                    this.trainingHistory.push({tree: i + 1, loss});
+
+                    // Styled progress output
+                    const progress = ((i + 1) / this.numTrees * 100).toFixed(0);
+                    const barLength = 20;
+                    const filled = Math.floor(barLength * (i + 1) / this.numTrees);
+                    const bar = '█'.repeat(filled) + '░'.repeat(barLength - filled);
+
+                    if ((i + 1) % Math.max(1, Math.floor(this.numTrees / 10)) === 0 || i === this.numTrees - 1) {
+                        console.log(`%c├─ [${bar}] ${progress}% | Tree ${i + 1}/${this.numTrees} | Loss: ${loss.toFixed(4)}`,
+                            'color: #0039A6; font-family: monospace;');
+                    }
                 }
 
-                console.log('Gradient boosting training complete!');
+                this._logBrand('✓ Gradient Boosting Complete', 'success');
+                console.log(`%c└─ Final Loss: ${this.trainingHistory[this.trainingHistory.length - 1].loss.toFixed(4)}`,
+                    'color: #10B981; font-weight: bold;');
+            }
+
+            /**
+             * Branded console logging
+             * @private
+             */
+            _logBrand(message, type = 'info') {
+                const styles = {
+                    primary: 'background: linear-gradient(135deg, #0039A6, #00AEEF); color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold;',
+                    success: 'background: linear-gradient(135deg, #10B981, #059669); color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold;',
+                    warning: 'background: linear-gradient(135deg, #F59E0B, #D97706); color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold;',
+                    error: 'background: linear-gradient(135deg, #EF4444, #DC2626); color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold;'
+                };
+                console.log(`%c${message}`, styles[type] || styles.info);
             }
 
             cloneAndTrainOnResiduals(template, data, residuals) {
@@ -2527,34 +2581,68 @@
         // =============================================================================
         // NEURAL DECISION TREE HYBRID
         // =============================================================================
+
+        /**
+         * NeuralDecisionTree - Hybrid neural network for decision trees
+         * Combines neural network flexibility with decision tree interpretability
+         * @class
+         */
         class NeuralDecisionTree {
-            constructor(inputSize = 5, hiddenSize = 10, outputSize = 1) {
-                this.inputSize = inputSize;
-                this.hiddenSize = hiddenSize;
-                this.outputSize = outputSize;
+            /**
+             * @param {number} inputSize - Number of input features
+             * @param {number} hiddenSize - Hidden layer size
+             * @param {number} outputSize - Number of outputs
+             * @param {number} learningRate - Learning rate for gradient descent
+             */
+            constructor(inputSize = 5, hiddenSize = 10, outputSize = 1, learningRate = 0.01) {
+                // Validation
+                this.inputSize = Math.max(1, Math.floor(inputSize));
+                this.hiddenSize = Math.max(1, Math.floor(hiddenSize));
+                this.outputSize = Math.max(1, Math.floor(outputSize));
+                this.learningRate = Math.max(0.0001, Math.min(1, learningRate));
 
-                // Initialize weights randomly
-                this.weightsInputHidden = this.randomMatrix(inputSize, hiddenSize);
-                this.weightsHiddenOutput = this.randomMatrix(hiddenSize, outputSize);
-                this.biasHidden = this.randomArray(hiddenSize);
-                this.biasOutput = this.randomArray(outputSize);
+                // Initialize weights with Xavier/Glorot initialization for better convergence
+                this.weightsInputHidden = this._xavierInit(inputSize, hiddenSize);
+                this.weightsHiddenOutput = this._xavierInit(hiddenSize, outputSize);
+                this.biasHidden = this.randomArray(hiddenSize, 0.1);
+                this.biasOutput = this.randomArray(outputSize, 0.1);
 
-                this.learningRate = 0.01;
+                this.trainingHistory = [];
+                this.bestLoss = Infinity;
             }
 
-            randomMatrix(rows, cols) {
+            /**
+             * Xavier/Glorot weight initialization for better convergence
+             * @private
+             */
+            _xavierInit(rows, cols) {
+                const limit = Math.sqrt(6 / (rows + cols));
                 const matrix = [];
                 for (let i = 0; i < rows; i++) {
                     matrix[i] = [];
                     for (let j = 0; j < cols; j++) {
-                        matrix[i][j] = (Math.random() - 0.5) * 2;
+                        matrix[i][j] = (Math.random() * 2 - 1) * limit;
                     }
                 }
                 return matrix;
             }
 
-            randomArray(size) {
-                return Array.from({length: size}, () => (Math.random() - 0.5) * 2);
+            /**
+             * Generate random matrix (legacy method, use _xavierInit instead)
+             * @deprecated Use _xavierInit for better initialization
+             */
+            randomMatrix(rows, cols) {
+                return this._xavierInit(rows, cols);
+            }
+
+            /**
+             * Generate random array with controlled variance
+             * @param {number} size - Array size
+             * @param {number} scale - Variance scale
+             * @returns {Array} Random array
+             */
+            randomArray(size, scale = 0.1) {
+                return Array.from({length: size}, () => (Math.random() - 0.5) * 2 * scale);
             }
 
             // Activation functions
@@ -2642,9 +2730,15 @@
                 }
             }
 
-            // Train the neural network
+            /**
+             * Train the neural network with elegant progress display
+             * @param {Array} data - Training data
+             * @param {number} epochs - Number of training epochs
+             */
             train(data, epochs = 100) {
-                console.log(`Training neural decision tree for ${epochs} epochs...`);
+                this._logBrand('🧠 Training Neural Decision Tree', 'primary');
+                console.log(`%c├─ Architecture: ${this.inputSize}→${this.hiddenSize}→${this.outputSize} | Epochs: ${epochs} | Learning Rate: ${this.learningRate.toFixed(4)}`,
+                    'color: #00AEEF; font-weight: normal;');
 
                 for (let epoch = 0; epoch < epochs; epoch++) {
                     let totalLoss = 0;
@@ -2659,12 +2753,43 @@
                         totalLoss += Math.pow(target[0] - outputs[0], 2);
                     });
 
-                    if (epoch % 10 === 0) {
-                        console.log(`Epoch ${epoch}, Loss: ${(totalLoss / data.length).toFixed(4)}`);
+                    const avgLoss = totalLoss / data.length;
+                    this.trainingHistory.push({epoch, loss: avgLoss});
+
+                    // Track best loss
+                    if (avgLoss < this.bestLoss) {
+                        this.bestLoss = avgLoss;
+                    }
+
+                    // Styled progress output (every 10% or final epoch)
+                    if (epoch % Math.max(1, Math.floor(epochs / 10)) === 0 || epoch === epochs - 1) {
+                        const progress = ((epoch + 1) / epochs * 100).toFixed(0);
+                        const barLength = 20;
+                        const filled = Math.floor(barLength * (epoch + 1) / epochs);
+                        const bar = '█'.repeat(filled) + '░'.repeat(barLength - filled);
+
+                        console.log(`%c├─ [${bar}] ${progress}% | Epoch ${epoch}/${epochs} | Loss: ${avgLoss.toFixed(6)}`,
+                            'color: #0039A6; font-family: monospace;');
                     }
                 }
 
-                console.log('Neural decision tree training complete!');
+                this._logBrand('✓ Neural Training Complete', 'success');
+                console.log(`%c└─ Best Loss: ${this.bestLoss.toFixed(6)} | Final Loss: ${this.trainingHistory[this.trainingHistory.length - 1].loss.toFixed(6)}`,
+                    'color: #10B981; font-weight: bold;');
+            }
+
+            /**
+             * Branded console logging
+             * @private
+             */
+            _logBrand(message, type = 'info') {
+                const styles = {
+                    primary: 'background: linear-gradient(135deg, #0039A6, #00AEEF); color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold;',
+                    success: 'background: linear-gradient(135deg, #10B981, #059669); color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold;',
+                    warning: 'background: linear-gradient(135deg, #F59E0B, #D97706); color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold;',
+                    error: 'background: linear-gradient(135deg, #EF4444, #DC2626); color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold;'
+                };
+                console.log(`%c${message}`, styles[type] || styles.info);
             }
 
             extractFeatures(dataPoint) {
