@@ -1008,13 +1008,40 @@
             }
         }
 
-        // Tree Builder System
+        /**
+         * TreeBuilder - Manages hierarchical decision tree construction
+         * Provides layer-based organization with automatic node connection
+         * @class
+         */
         class TreeBuilder {
             constructor() {
                 this.layers = [];
                 this.nodes = new Map();
                 this.selectedNode = null;
                 this.mode = 'build'; // 'build' or 'test'
+                this._updateDebounceTimer = null;
+                this._performanceMetrics = {
+                    nodeCount: 0,
+                    lastUpdate: Date.now(),
+                    updateCount: 0
+                };
+            }
+
+            /**
+             * Get tree statistics
+             * @returns {Object} Tree metrics
+             */
+            getStatistics() {
+                return {
+                    totalNodes: this.nodes.size,
+                    totalLayers: this.layers.length,
+                    maxDepth: Math.max(...Array.from(this.nodes.values()).map(n => n.depth), 0),
+                    averageNodesPerLayer: this.layers.length > 0
+                        ? this.nodes.size / this.layers.length
+                        : 0,
+                    terminalNodes: Array.from(this.nodes.values()).filter(n => n.isTerminal).length,
+                    decisionNodes: Array.from(this.nodes.values()).filter(n => !n.isTerminal).length
+                };
             }
 
             addLayer() {
@@ -1185,9 +1212,36 @@
                 visualizeTree();
             }
 
+            /**
+             * Update layers display with debouncing for performance
+             * Uses Document Fragment for efficient DOM manipulation
+             * @private
+             */
             updateLayersDisplay() {
+                // Clear existing debounce timer
+                if (this._updateDebounceTimer) {
+                    clearTimeout(this._updateDebounceTimer);
+                }
+
+                // Debounce updates for performance
+                this._updateDebounceTimer = setTimeout(() => {
+                    this._performLayersUpdate();
+                }, 100);
+            }
+
+            /**
+             * Perform the actual layers display update
+             * @private
+             */
+            _performLayersUpdate() {
                 const container = document.getElementById('layers-container');
-                container.innerHTML = '';
+                if (!container) {
+                    console.warn('Layers container not found');
+                    return;
+                }
+
+                // Use Document Fragment for performance
+                const fragment = document.createDocumentFragment();
 
                 this.layers.forEach((layer, index) => {
                     const layerDiv = document.createElement('div');
@@ -1261,8 +1315,16 @@
                     addNodeBtn.onclick = () => this.addNodeToLayer(index);
                     layerDiv.appendChild(addNodeBtn);
 
-                    container.appendChild(layerDiv);
+                    fragment.appendChild(layerDiv);
                 });
+
+                // Clear and update in one operation
+                container.innerHTML = '';
+                container.appendChild(fragment);
+
+                // Update performance metrics
+                this._performanceMetrics.updateCount++;
+                this._performanceMetrics.lastUpdate = Date.now();
             }
 
             setNodeAsLeftChild(childId, parentId) {
@@ -1611,55 +1673,180 @@
         // =============================================================================
         // FUZZY LOGIC SYSTEM
         // =============================================================================
+
+        /**
+         * FuzzySet - Represents a fuzzy set with membership functions
+         * Supports multiple membership function types with robust math
+         * @class
+         */
         class FuzzySet {
+            /**
+             * @param {string} name - Fuzzy set name
+             * @param {string} membershipFunction - Type: triangular, trapezoidal, gaussian, sigmoid, bell
+             * @param {Object} params - Function-specific parameters
+             */
             constructor(name, membershipFunction, params = {}) {
-                this.name = name;
-                this.membershipFunction = membershipFunction;  // 'triangular', 'trapezoidal', 'gaussian', 'sigmoid'
-                this.params = params;  // Function-specific parameters
-            }
-
-            // Calculate membership degree for a value
-            membership(x) {
-                switch (this.membershipFunction) {
-                    case 'triangular':
-                        return this.triangularMembership(x, this.params.a, this.params.b, this.params.c);
-                    case 'trapezoidal':
-                        return this.trapezoidalMembership(x, this.params.a, this.params.b, this.params.c, this.params.d);
-                    case 'gaussian':
-                        return this.gaussianMembership(x, this.params.mean, this.params.sigma);
-                    case 'sigmoid':
-                        return this.sigmoidMembership(x, this.params.a, this.params.c);
-                    case 'bell':
-                        return this.bellMembership(x, this.params.a, this.params.b, this.params.c);
-                    default:
-                        return 0;
+                if (!name || typeof name !== 'string') {
+                    throw new Error('FuzzySet name must be a non-empty string');
                 }
+
+                this.name = name;
+                this.membershipFunction = membershipFunction;
+                this.params = this._validateParams(params, membershipFunction);
             }
 
+            /**
+             * Validate and sanitize membership function parameters
+             * @private
+             */
+            _validateParams(params, funcType) {
+                const validated = {...params};
+
+                // Ensure numeric parameters
+                Object.keys(validated).forEach(key => {
+                    if (!Number.isFinite(validated[key])) {
+                        console.warn(`Invalid parameter ${key}, using 0`);
+                        validated[key] = 0;
+                    }
+                });
+
+                // Type-specific validation
+                if (funcType === 'gaussian' && validated.sigma !== undefined) {
+                    // Prevent division by zero
+                    validated.sigma = Math.max(Math.abs(validated.sigma), 1e-10);
+                }
+
+                if (funcType === 'bell' && validated.a !== undefined) {
+                    validated.a = Math.max(Math.abs(validated.a), 1e-10);
+                }
+
+                return validated;
+            }
+
+            /**
+             * Calculate membership degree for a value
+             * @param {number} x - Input value
+             * @returns {number} Membership degree [0, 1]
+             */
+            membership(x) {
+                if (!Number.isFinite(x)) {
+                    console.warn('Invalid membership input, returning 0');
+                    return 0;
+                }
+
+                let result = 0;
+
+                try {
+                    switch (this.membershipFunction) {
+                        case 'triangular':
+                            result = this.triangularMembership(x, this.params.a, this.params.b, this.params.c);
+                            break;
+                        case 'trapezoidal':
+                            result = this.trapezoidalMembership(x, this.params.a, this.params.b, this.params.c, this.params.d);
+                            break;
+                        case 'gaussian':
+                            result = this.gaussianMembership(x, this.params.mean, this.params.sigma);
+                            break;
+                        case 'sigmoid':
+                            result = this.sigmoidMembership(x, this.params.a, this.params.c);
+                            break;
+                        case 'bell':
+                            result = this.bellMembership(x, this.params.a, this.params.b, this.params.c);
+                            break;
+                        default:
+                            console.warn(`Unknown membership function: ${this.membershipFunction}`);
+                            return 0;
+                    }
+                } catch (error) {
+                    console.error(`Membership calculation error: ${error.message}`);
+                    return 0;
+                }
+
+                // Ensure result is in [0, 1]
+                return Math.max(0, Math.min(1, result));
+            }
+
+            /**
+             * Triangular membership function
+             * @param {number} x - Input value
+             * @param {number} a - Left point
+             * @param {number} b - Peak point
+             * @param {number} c - Right point
+             * @returns {number} Membership [0, 1]
+             */
             triangularMembership(x, a, b, c) {
                 if (x <= a || x >= c) return 0;
                 if (x === b) return 1;
-                if (x < b) return (x - a) / (b - a);
-                return (c - x) / (c - b);
+
+                // Prevent division by zero
+                if (x < b) {
+                    const denominator = b - a;
+                    return denominator !== 0 ? (x - a) / denominator : 0;
+                }
+
+                const denominator = c - b;
+                return denominator !== 0 ? (c - x) / denominator : 0;
             }
 
+            /**
+             * Trapezoidal membership function
+             */
             trapezoidalMembership(x, a, b, c, d) {
                 if (x <= a || x >= d) return 0;
                 if (x >= b && x <= c) return 1;
-                if (x < b) return (x - a) / (b - a);
-                return (d - x) / (d - c);
+
+                if (x < b) {
+                    const denominator = b - a;
+                    return denominator !== 0 ? (x - a) / denominator : 0;
+                }
+
+                const denominator = d - c;
+                return denominator !== 0 ? (d - x) / denominator : 0;
             }
 
+            /**
+             * Gaussian membership function
+             * Prevents overflow with bounds checking
+             */
             gaussianMembership(x, mean, sigma) {
-                return Math.exp(-Math.pow(x - mean, 2) / (2 * Math.pow(sigma, 2)));
+                if (sigma === 0) return x === mean ? 1 : 0;
+
+                const exponent = -Math.pow(x - mean, 2) / (2 * Math.pow(sigma, 2));
+
+                // Prevent underflow for large negative exponents
+                if (exponent < -100) return 0;
+
+                return Math.exp(exponent);
             }
 
+            /**
+             * Sigmoid membership function
+             * Prevents overflow in exponential
+             */
             sigmoidMembership(x, a, c) {
-                return 1 / (1 + Math.exp(-a * (x - c)));
+                const product = -a * (x - c);
+
+                // Prevent overflow
+                if (product > 100) return 0;
+                if (product < -100) return 1;
+
+                return 1 / (1 + Math.exp(product));
             }
 
+            /**
+             * Bell-shaped membership function
+             * Prevents division by zero and overflow
+             */
             bellMembership(x, a, b, c) {
-                return 1 / (1 + Math.pow(Math.abs((x - c) / a), 2 * b));
+                if (a === 0) return x === c ? 1 : 0;
+
+                const base = Math.abs((x - c) / a);
+                const exponent = 2 * b;
+
+                // Prevent overflow for large bases
+                if (base > 100) return 0;
+
+                return 1 / (1 + Math.pow(base, exponent));
             }
         }
 
@@ -1862,61 +2049,233 @@
         // =============================================================================
         // PROBABILISTIC LOGIC SYSTEM
         // =============================================================================
+
+        /**
+         * ProbabilisticNode - Decision node with probability theory support
+         * Extends DecisionNode with Bayesian inference and probabilistic logic
+         * @class
+         * @extends DecisionNode
+         */
         class ProbabilisticNode extends DecisionNode {
             constructor(question, depth, id, threshold, score) {
                 super(question, depth, id, threshold, score);
-                this.probability = 0.5;  // Prior probability
+                this.probability = 0.5;  // Prior probability [0, 1]
                 this.conditionalProbabilities = new Map();  // P(child | parent)
                 this.evidenceWeights = new Map();  // Evidence from observations
+                this._probabilityHistory = [];  // Track probability changes
             }
 
-            // Probabilistic AND operation (T-norm)
+            /**
+             * Clamp probability to valid range [0, 1]
+             * @private
+             * @param {number} p - Probability value
+             * @returns {number} Clamped probability
+             */
+            _clampProbability(p) {
+                if (!Number.isFinite(p)) {
+                    console.warn('Invalid probability, using 0.5');
+                    return 0.5;
+                }
+                return Math.max(0, Math.min(1, p));
+            }
+
+            /**
+             * Set probability with validation
+             * @param {number} p - New probability value
+             */
+            setProbability(p) {
+                const oldProb = this.probability;
+                this.probability = this._clampProbability(p);
+
+                // Track history
+                this._probabilityHistory.push({
+                    timestamp: Date.now(),
+                    oldValue: oldProb,
+                    newValue: this.probability
+                });
+
+                // Keep only last 100 history entries
+                if (this._probabilityHistory.length > 100) {
+                    this._probabilityHistory.shift();
+                }
+            }
+
+            /**
+             * Probabilistic AND operation (T-norm)
+             * @static
+             * @param {number} p1 - First probability [0, 1]
+             * @param {number} p2 - Second probability [0, 1]
+             * @param {string} method - T-norm method
+             * @returns {number} Result probability [0, 1]
+             */
             static probabilisticAND(p1, p2, method = 'product') {
-                if (method === 'product') {
-                    return p1 * p2;
-                } else if (method === 'minimum') {
-                    return Math.min(p1, p2);
-                } else if (method === 'lukasiewicz') {
-                    return Math.max(0, p1 + p2 - 1);
+                // Validate inputs
+                p1 = Math.max(0, Math.min(1, p1 || 0));
+                p2 = Math.max(0, Math.min(1, p2 || 0));
+
+                let result;
+                switch (method) {
+                    case 'product':
+                        result = p1 * p2;
+                        break;
+                    case 'minimum':
+                        result = Math.min(p1, p2);
+                        break;
+                    case 'lukasiewicz':
+                        result = Math.max(0, p1 + p2 - 1);
+                        break;
+                    case 'drastic':
+                        // Drastic T-norm
+                        if (p1 === 1) result = p2;
+                        else if (p2 === 1) result = p1;
+                        else result = 0;
+                        break;
+                    default:
+                        result = p1 * p2;
                 }
-                return p1 * p2;
+
+                return Math.max(0, Math.min(1, result));
             }
 
-            // Probabilistic OR operation (T-conorm)
+            /**
+             * Probabilistic OR operation (T-conorm)
+             * @static
+             * @param {number} p1 - First probability [0, 1]
+             * @param {number} p2 - Second probability [0, 1]
+             * @param {string} method - T-conorm method
+             * @returns {number} Result probability [0, 1]
+             */
             static probabilisticOR(p1, p2, method = 'probabilistic_sum') {
-                if (method === 'probabilistic_sum') {
-                    return p1 + p2 - p1 * p2;
-                } else if (method === 'maximum') {
-                    return Math.max(p1, p2);
-                } else if (method === 'lukasiewicz') {
-                    return Math.min(1, p1 + p2);
+                // Validate inputs
+                p1 = Math.max(0, Math.min(1, p1 || 0));
+                p2 = Math.max(0, Math.min(1, p2 || 0));
+
+                let result;
+                switch (method) {
+                    case 'probabilistic_sum':
+                        result = p1 + p2 - p1 * p2;
+                        break;
+                    case 'maximum':
+                        result = Math.max(p1, p2);
+                        break;
+                    case 'lukasiewicz':
+                        result = Math.min(1, p1 + p2);
+                        break;
+                    case 'drastic':
+                        // Drastic T-conorm
+                        if (p1 === 0) result = p2;
+                        else if (p2 === 0) result = p1;
+                        else result = 1;
+                        break;
+                    default:
+                        result = p1 + p2 - p1 * p2;
                 }
-                return p1 + p2 - p1 * p2;
+
+                return Math.max(0, Math.min(1, result));
             }
 
-            // Probabilistic NOT operation
+            /**
+             * Probabilistic NOT operation
+             * @static
+             * @param {number} p - Probability [0, 1]
+             * @returns {number} Complement probability [0, 1]
+             */
             static probabilisticNOT(p) {
+                p = Math.max(0, Math.min(1, p || 0));
                 return 1 - p;
             }
 
-            // Calculate path probability
+            /**
+             * Calculate path probability through decision tree
+             * @param {Array} path - Array of nodes in path
+             * @returns {number} Path probability [0, 1]
+             */
             getPathProbability(path) {
+                if (!Array.isArray(path) || path.length === 0) {
+                    return 0;
+                }
+
                 let prob = 1.0;
+                let underflowProtection = 1e-300;  // Prevent underflow
+
                 for (let i = 0; i < path.length - 1; i++) {
                     const from = path[i];
                     const to = path[i + 1];
-                    const transitionProb = from.conditionalProbabilities.get(to.id) || 0.5;
-                    prob *= transitionProb;
+
+                    if (!from || !to) continue;
+
+                    const transitionProb = from.conditionalProbabilities
+                        ? (from.conditionalProbabilities.get(to.id) || 0.5)
+                        : 0.5;
+
+                    prob *= Math.max(underflowProtection, transitionProb);
+
+                    // Early exit if probability becomes negligible
+                    if (prob < underflowProtection) {
+                        return 0;
+                    }
                 }
-                return prob;
+
+                return this._clampProbability(prob);
             }
 
-            // Update probability using Bayes rule
+            /**
+             * Update probability using Bayes' rule with numerical stability
+             * P(H|E) = P(E|H) * P(H) / P(E)
+             * @param {number} likelihood - P(E|H)
+             * @param {number} priorEvidence - P(E)
+             * @returns {number} Updated probability
+             */
             updateProbabilityBayes(likelihood, priorEvidence) {
-                // P(H|E) = P(E|H) * P(H) / P(E)
+                // Validate inputs
+                likelihood = this._clampProbability(likelihood);
+                priorEvidence = Math.max(1e-10, this._clampProbability(priorEvidence));  // Prevent division by zero
+
+                const oldProb = this.probability;
+
+                // Bayes' rule
                 const posterior = (likelihood * this.probability) / priorEvidence;
-                this.probability = Math.max(0, Math.min(1, posterior));
+
+                this.setProbability(posterior);
+
+                console.log(`Bayesian update: ${oldProb.toFixed(4)} → ${this.probability.toFixed(4)}`);
+
                 return this.probability;
+            }
+
+            /**
+             * Calculate entropy of probability distribution
+             * H(X) = -p*log(p) - (1-p)*log(1-p)
+             * @returns {number} Entropy value
+             */
+            getEntropy() {
+                const p = this.probability;
+                const q = 1 - p;
+
+                // Handle edge cases
+                if (p === 0 || p === 1) return 0;
+
+                // Shannon entropy
+                return -(p * Math.log2(p) + q * Math.log2(q));
+            }
+
+            /**
+             * Calculate Kullback-Leibler divergence from another distribution
+             * @param {ProbabilisticNode} other - Other node
+             * @returns {number} KL divergence
+             */
+            getKLDivergence(other) {
+                const p = this.probability;
+                const q = other.probability;
+
+                // Handle edge cases
+                if (p === 0) return 0;
+                if (q === 0) return Infinity;
+
+                const kl1 = p * Math.log2(p / q);
+                const kl2 = (1 - p) * Math.log2((1 - p) / (1 - q));
+
+                return kl1 + kl2;
             }
         }
 
