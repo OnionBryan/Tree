@@ -4,6 +4,7 @@ import { Toaster, toast } from 'react-hot-toast';
 import './App.css';
 
 // Import components
+import LogicBuilder from './components/LogicBuilder.jsx';
 import TreeVisualization from './components/TreeVisualization.jsx';
 import ConnectionCanvas from './components/Canvas/ConnectionCanvas.jsx';
 import ConfigPanel from './components/ConfigPanel.jsx';
@@ -212,23 +213,11 @@ function App() {
       <main className="app-main">
         {/* Logic Builder Tab */}
         {activeTab === 'builder' && (
-          <div className="tab-content">
-            <div className="tab-header">
-              <h2>Logic Builder</h2>
-              <p>Design multi-branch decision trees with fuzzy logic gates</p>
-            </div>
-            <div className="builder-content">
-              <div className="builder-info">
-                <p>🚧 Logic Builder component coming soon...</p>
-                <p>This will integrate node creation, logic gate configuration, and truth table generation.</p>
-                <button
-                  className="btn-primary"
-                  onClick={() => toast.info('Opening fuzzy truth table')}
-                >
-                  Open Fuzzy Truth Table
-                </button>
-              </div>
-            </div>
+          <div className="tab-content full-height">
+            <LogicBuilder
+              logicStore={logicStore}
+              onOpenFuzzyTable={() => setShowFuzzyTable(true)}
+            />
           </div>
         )}
 
