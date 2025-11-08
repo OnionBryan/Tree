@@ -5092,35 +5092,52 @@ You can now:
                     allScores.push(step.score);
                 });
             });
-            analysis.totalInformation = calculateEntropy(allScores) * allScores.length;
+            // Edge case: Empty scores array
+            analysis.totalInformation = allScores.length > 0 ?
+                calculateEntropy(allScores) * allScores.length : 0;
 
             // Calculate redundancy (how much information is repeated across nodes)
             const uniqueInformation = Object.values(analysis.nodeEntropy)
                 .reduce((sum, node) => sum + node.entropy, 0);
             const theoreticalMaxInfo = Math.log2(11) * treeBuilder.nodes.size;
-            analysis.redundancy = 1 - (uniqueInformation / theoreticalMaxInfo);
+            // Edge case: No nodes means no redundancy to calculate
+            analysis.redundancy = theoreticalMaxInfo > 0 ?
+                1 - (uniqueInformation / theoreticalMaxInfo) : 0;
 
             // Add summary metrics
+            const nodeEntropyValues = Object.values(analysis.nodeEntropy);
+            const infoGainValues = Object.values(analysis.informationGain);
+            const nodeEntropyCount = nodeEntropyValues.length;
+
             analysis.summary = {
-                averageNodeEntropy: uniqueInformation / Object.keys(analysis.nodeEntropy).length,
-                maxNodeEntropy: Math.max(...Object.values(analysis.nodeEntropy).map(n => n.entropy)),
-                minNodeEntropy: Math.min(...Object.values(analysis.nodeEntropy).map(n => n.entropy)),
-                averageInfoGain: Object.values(analysis.informationGain).length > 0 ?
-                    Object.values(analysis.informationGain).reduce((sum, ig) => sum + ig.gain, 0) / 
-                    Object.values(analysis.informationGain).length : 0,
+                // Edge case: Empty nodeEntropy object
+                averageNodeEntropy: nodeEntropyCount > 0 ?
+                    uniqueInformation / nodeEntropyCount : 0,
+                maxNodeEntropy: nodeEntropyCount > 0 ?
+                    Math.max(...nodeEntropyValues.map(n => n.entropy)) : 0,
+                minNodeEntropy: nodeEntropyCount > 0 ?
+                    Math.min(...nodeEntropyValues.map(n => n.entropy)) : 0,
+                averageInfoGain: infoGainValues.length > 0 ?
+                    infoGainValues.reduce((sum, ig) => sum + ig.gain, 0) /
+                    infoGainValues.length : 0,
                 pathDiversity: analysis.pathEntropy / Math.log2(Object.keys(pathDistribution).length || 1),
-                decisionEfficiency: Object.values(analysis.informationGain)
-                    .reduce((sum, ig) => sum + ig.efficiency, 0) / 
-                    (Object.values(analysis.informationGain).length || 1)
+                decisionEfficiency: infoGainValues.length > 0 ?
+                    infoGainValues.reduce((sum, ig) => sum + ig.efficiency, 0) /
+                    infoGainValues.length : 0
             };
 
             return analysis;
         }
 
+        /**
+         * Collect score and branching data for a specific node from batch results
+         * @param {string} nodeId - The ID of the node to collect data for
+         * @returns {{scores: number[], branches: {left: number, right: number}, branchProbs: {left: number, right: number}}}
+         */
         function collectNodeData(nodeId) {
             const scores = [];
             const branches = { left: 0, right: 0 };
-            
+
             window.batchResults.forEach(result => {
                 const step = result.path.find(p => p.nodeId === nodeId);
                 if (step) {
@@ -5139,7 +5156,14 @@ You can now:
             return { scores, branches, branchProbs };
         }
 
+        /**
+         * Calculate Shannon entropy of a value distribution
+         * H(X) = -Σ p(x) * log₂(p(x))
+         * @param {number[]} values - Array of numeric values to calculate entropy for
+         * @returns {number} Entropy in bits (0 = no uncertainty, higher = more uncertainty)
+         */
         function calculateEntropy(values) {
+            // Edge case: Empty array has no entropy
             if (values.length === 0) return 0;
 
             // Create bins for the values
@@ -5154,27 +5178,37 @@ You can now:
             const probabilities = Object.values(bins).map(count => count / total);
 
             // Calculate entropy: H = -Σ p(x) * log2(p(x))
-            return -probabilities.reduce((sum, p) => 
+            return -probabilities.reduce((sum, p) =>
                 sum + (p > 0 ? p * Math.log2(p) : 0), 0
             );
         }
 
+        /**
+         * Calculate entropy of binary branching probabilities
+         * @param {{left: number, right: number}} branchProbs - Probabilities for left and right branches
+         * @returns {number} Branch entropy in bits (max 1 bit for perfectly balanced branches)
+         */
         function calculateBranchEntropy(branchProbs) {
             const probs = [branchProbs.left, branchProbs.right].filter(p => p > 0);
             if (probs.length === 0) return 0;
-            
+
             return -probs.reduce((sum, p) => sum + p * Math.log2(p), 0);
         }
 
+        /**
+         * Extract all sequential node pairs from batch results paths
+         * Used for mutual information analysis between adjacent decision nodes
+         * @returns {Array<{node1Id: string, node2Id: string, node1Question: string, node2Question: string}>}
+         */
         function getSequentialNodePairs() {
             const pairs = new Map();
-            
+
             window.batchResults.forEach(result => {
                 for (let i = 0; i < result.path.length - 1; i++) {
                     const node1 = result.path[i];
                     const node2 = result.path[i + 1];
                     const pairKey = `${node1.nodeId}_${node2.nodeId}`;
-                    
+
                     if (!pairs.has(pairKey)) {
                         pairs.set(pairKey, {
                             node1Id: node1.nodeId,
@@ -5185,26 +5219,34 @@ You can now:
                     }
                 }
             });
-            
+
             return Array.from(pairs.values());
         }
 
+        /**
+         * Calculate mutual information between two nodes
+         * I(X;Y) = H(X) + H(Y) - H(X,Y)
+         * Measures how much knowing one node's outcome tells us about the other
+         * @param {string} node1Id - First node ID
+         * @param {string} node2Id - Second node ID
+         * @returns {{mutualInfo: number, entropy1: number, entropy2: number, jointEntropy: number, correlation: number}|null}
+         */
         function calculateMutualInformation(node1Id, node2Id) {
             const joint = [];
             const node1Scores = [];
             const node2Scores = [];
-            
+
             window.batchResults.forEach(result => {
                 const node1Step = result.path.find(p => p.nodeId === node1Id);
                 const node2Step = result.path.find(p => p.nodeId === node2Id);
-                
+
                 if (node1Step && node2Step) {
                     node1Scores.push(Math.round(node1Step.score));
                     node2Scores.push(Math.round(node2Step.score));
                     joint.push([Math.round(node1Step.score), Math.round(node2Step.score)]);
                 }
             });
-            
+
             if (joint.length === 0) return null;
 
             // Calculate individual entropies
@@ -5217,9 +5259,9 @@ You can now:
                 const key = `${v1},${v2}`;
                 jointCounts[key] = (jointCounts[key] || 0) + 1;
             });
-            
+
             const jointProbs = Object.values(jointCounts).map(count => count / joint.length);
-            const jointEntropy = -jointProbs.reduce((sum, p) => 
+            const jointEntropy = -jointProbs.reduce((sum, p) =>
                 sum + (p > 0 ? p * Math.log2(p) : 0), 0
             );
 
@@ -5227,7 +5269,7 @@ You can now:
             const mutualInfo = entropy1 + entropy2 - jointEntropy;
 
             // Calculate normalized correlation (mutual info / min entropy)
-            const correlation = Math.min(entropy1, entropy2) > 0 ? 
+            const correlation = Math.min(entropy1, entropy2) > 0 ?
                 mutualInfo / Math.min(entropy1, entropy2) : 0;
 
             return {
@@ -5239,13 +5281,21 @@ You can now:
             };
         }
 
+        /**
+         * Calculate conditional entropy H(Y|X) - uncertainty in child given parent
+         * H(Y|X) = Σ p(x) * H(Y|X=x)
+         * Lower values indicate stronger dependency between nodes
+         * @param {string} parentId - Parent node ID
+         * @param {string} childId - Child node ID
+         * @returns {number|null} Conditional entropy in bits, or null if no data
+         */
         function calculateConditionalEntropy(parentId, childId) {
             const conditionalData = {};
-            
+
             window.batchResults.forEach(result => {
                 const parentStep = result.path.find(p => p.nodeId === parentId);
                 const childStep = result.path.find(p => p.nodeId === childId);
-                
+
                 if (parentStep && childStep) {
                     const parentBin = Math.round(parentStep.score);
                     if (!conditionalData[parentBin]) {
@@ -5254,7 +5304,7 @@ You can now:
                     conditionalData[parentBin].push(Math.round(childStep.score));
                 }
             });
-            
+
             if (Object.keys(conditionalData).length === 0) return null;
 
             // Calculate H(Y|X) = Σ p(x) * H(Y|X=x)
@@ -5262,6 +5312,9 @@ You can now:
             Object.values(conditionalData).forEach(samples => {
                 totalSamples += samples.length;
             });
+
+            // Edge case: No samples collected
+            if (totalSamples === 0) return null;
 
             let conditionalEntropy = 0;
             Object.entries(conditionalData).forEach(([parentValue, childValues]) => {
@@ -5516,6 +5569,11 @@ You can now:
             URL.revokeObjectURL(url);
         }
         
+        /**
+         * Calculate tree structural complexity metrics
+         * Analyzes tree shape, depth, branching patterns, and balance
+         * @returns {{structuralEntropy: number, depthComplexity: number, branchingEntropy: number, theoreticalMaxEntropy: number, balanceScore: number}}
+         */
         function calculateTreeComplexity() {
             const complexity = {
                 structuralEntropy: 0,
@@ -5558,17 +5616,26 @@ You can now:
                 }
                 
                 // Theoretical maximum entropy for a balanced binary tree
-                complexity.theoreticalMaxEntropy = Math.log2(Math.pow(2, treeBuilder.layers.length) - 1);
-                
+                // Edge case: Single layer tree (2^1 - 1 = 1) gives log2(1) = 0
+                const maxNodes = Math.pow(2, treeBuilder.layers.length) - 1;
+                complexity.theoreticalMaxEntropy = maxNodes > 1 ? Math.log2(maxNodes) : 0;
+
                 // Balance score - how balanced is the tree (0-1, 1 being perfectly balanced)
                 const actualPaths = countAllPaths(treeBuilder.layers[0]?.nodes[0]);
                 const maxPossiblePaths = Math.pow(2, treeBuilder.layers.length - 1);
-                complexity.balanceScore = actualPaths / maxPossiblePaths;
+                // Edge case: Empty tree or single-layer tree
+                complexity.balanceScore = maxPossiblePaths > 0 ?
+                    actualPaths / maxPossiblePaths : 0;
             }
             
             return complexity;
         }
         
+        /**
+         * Recursively count all paths from a node to leaf nodes
+         * @param {DecisionNode} node - Starting node
+         * @returns {number} Total number of paths to leaves
+         */
         function countAllPaths(node) {
             if (!node) return 0;
             if (!node.left && !node.right) return 1;
@@ -5907,12 +5974,18 @@ You can now:
             }
         }
 
-        // Helper functions for tree generation
+        /**
+         * Calculate Pearson correlation coefficient between two arrays
+         * r = Σ((x - x̄)(y - ȳ)) / √(Σ(x - x̄)² · Σ(y - ȳ)²)
+         * @param {number[]} x - First array of values
+         * @param {number[]} y - Second array of values
+         * @returns {number} Correlation coefficient [-1, 1], or 0 if no variance
+         */
         function calculateCorrelation(x, y) {
             const n = x.length;
             const meanX = x.reduce((a, b) => a + b, 0) / n;
             const meanY = y.reduce((a, b) => a + b, 0) / n;
-            
+
             let num = 0, denomX = 0, denomY = 0;
             for (let i = 0; i < n; i++) {
                 const dx = x[i] - meanX;
@@ -5921,26 +5994,65 @@ You can now:
                 denomX += dx * dx;
                 denomY += dy * dy;
             }
-            
+
+            // Edge case: No variance in one or both variables
             return denomX * denomY === 0 ? 0 : num / Math.sqrt(denomX * denomY);
         }
 
+        /**
+         * Calculate median of array values
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Median value, or 0 if array is empty
+         */
         function calculateMedian(values) {
+            // Edge case: Empty array
+            if (!values || values.length === 0) return 0;
+
             const sorted = [...values].sort((a, b) => a - b);
             const mid = Math.floor(sorted.length / 2);
             return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
         }
 
+        /**
+         * Calculate arithmetic mean of array values
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Mean value, or 0 if array is empty
+         */
         function calculateMean(values) {
+            // Edge case: Empty array
+            if (!values || values.length === 0) return 0;
+
             return values.reduce((a, b) => a + b, 0) / values.length;
         }
 
+        /**
+         * Calculate variance of array values (population variance)
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Variance, or 0 if array is empty or single element
+         */
         function calculateVariance(values) {
+            // Edge case: Empty or single-element array
+            if (!values || values.length === 0) return 0;
+            if (values.length === 1) return 0;
+
             const mean = calculateMean(values);
             return values.reduce((sum, val) => sum + (val - mean) ** 2, 0) / values.length;
         }
 
+        /**
+         * Calculate percentile of array values using linear interpolation
+         * @param {number[]} values - Array of numeric values
+         * @param {number} p - Percentile (0-100)
+         * @returns {number} Percentile value, or 0 if array is empty
+         */
         function calculatePercentile(values, p) {
+            // Edge case: Empty array
+            if (!values || values.length === 0) return 0;
+            // Edge case: Invalid percentile range
+            if (p < 0 || p > 100) return 0;
+            // Edge case: Single element
+            if (values.length === 1) return values[0];
+
             const sorted = [...values].sort((a, b) => a - b);
             const index = (p / 100) * (sorted.length - 1);
             const lower = Math.floor(index);
@@ -5949,8 +6061,18 @@ You can now:
             return sorted[lower] * (1 - weight) + sorted[upper] * weight;
         }
 
+        /**
+         * Calculate information gain from splitting data at a threshold
+         * IG = H(parent) - Σ(weight_i * H(child_i))
+         * Used in decision tree construction to find optimal splits
+         * @param {Array<Object>} data - Dataset to split
+         * @param {string} column - Column name to split on
+         * @param {number} threshold - Split threshold value
+         * @returns {number} Information gain in bits (higher = better split)
+         */
         function calculateInformationGain(data, column, threshold) {
             const total = data.length;
+            // Edge case: Empty dataset
             if (total === 0) return 0;
 
             // Parent entropy
@@ -5965,9 +6087,9 @@ You can now:
             const leftWeight = leftData.length / total;
             const rightWeight = rightData.length / total;
 
-            const leftEntropy = leftData.length > 0 ? 
+            const leftEntropy = leftData.length > 0 ?
                 calculateEntropy(leftData.map(row => row[column] || 0)) : 0;
-            const rightEntropy = rightData.length > 0 ? 
+            const rightEntropy = rightData.length > 0 ?
                 calculateEntropy(rightData.map(row => row[column] || 0)) : 0;
 
             return parentEntropy - (leftWeight * leftEntropy + rightWeight * rightEntropy);
