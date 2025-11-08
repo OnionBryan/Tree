@@ -6935,5 +6935,32 @@ You can now:
             originalSubmitScore.call(this);
         };
     </script>
+
+    <!-- Tree Visualization Engine Module -->
+    <script src="tree-visualization.js"></script>
+    <script>
+        // Initialize tree builder when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Create container for tree builder if needed
+            const treeContainer = document.createElement('div');
+            treeContainer.id = 'enhancedBuilderContainer';
+            treeContainer.style.display = 'none'; // Hidden by default
+            document.body.appendChild(treeContainer);
+
+            // Initialize the tree builder
+            window.treeBuilder = new TreeVisualization.EnhancedTreeBuilder('enhancedBuilderContainer');
+
+            console.log('✨ Tree Visualization Engine loaded and ready');
+            console.log('Available classes:', Object.keys(TreeVisualization));
+        });
+
+        // Optional: Add a button to toggle tree builder visibility
+        function toggleTreeBuilder() {
+            const container = document.getElementById('enhancedBuilderContainer');
+            if (container) {
+                container.style.display = container.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+    </script>
 </body>
 </html>
