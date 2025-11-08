@@ -6220,38 +6220,163 @@ You can now:
             return paths;
         }
 
-        // Advanced Tree Generation from Survey Data
+        /**
+         * Analyze survey data to provide generation recommendations
+         * @param {Array<Object>} data - Survey data
+         * @returns {{responses: number, columns: number, avgCorrelation: number, variance: number, recommendation: string, recommended: string}}
+         */
+        function analyzeDataForTreeGeneration(data) {
+            // Edge case: Invalid data
+            if (!data || !Array.isArray(data) || data.length === 0 || !data[0]) {
+                return {
+                    responses: 0,
+                    columns: 0,
+                    avgCorrelation: 0,
+                    variance: 0,
+                    recommendation: 'No data available',
+                    recommended: 'information'
+                };
+            }
+
+            const responses = data.length;
+            const columns = Object.keys(data[0]).filter(key => typeof data[0][key] === 'number');
+            const numColumns = columns.length;
+
+            // Calculate average correlation
+            let totalCorr = 0;
+            let corrCount = 0;
+            for (let i = 0; i < numColumns && i < 10; i++) {
+                for (let j = i + 1; j < numColumns && j < 10; j++) {
+                    const vals1 = data.map(row => row[columns[i]] || 0);
+                    const vals2 = data.map(row => row[columns[j]] || 0);
+                    const corr = calculateCorrelation(vals1, vals2);
+                    if (isFinite(corr)) {
+                        totalCorr += Math.abs(corr);
+                        corrCount++;
+                    }
+                }
+            }
+            const avgCorrelation = corrCount > 0 ? totalCorr / corrCount : 0;
+
+            // Calculate average variance
+            let totalVariance = 0;
+            for (let i = 0; i < Math.min(numColumns, 10); i++) {
+                const vals = data.map(row => row[columns[i]] || 0);
+                totalVariance += calculateVariance(vals);
+            }
+            const variance = numColumns > 0 ? totalVariance / Math.min(numColumns, 10) : 0;
+
+            // Generate recommendation
+            let recommendation = '';
+            let recommended = 'information'; // Default
+
+            if (numColumns < 2) {
+                recommendation = 'Not enough variables. Consider adding more questions.';
+            } else if (responses < 10) {
+                recommendation = 'Limited data. Any algorithm will work, but consider collecting more responses.';
+            } else if (avgCorrelation > 0.6) {
+                recommendation = 'High correlation detected! Correlation MST is ideal for your data.';
+                recommended = 'correlation';
+            } else if (responses > 100 && numColumns > 5) {
+                recommendation = 'Large dataset! Hybrid approach will give best results.';
+                recommended = 'hybrid';
+            } else {
+                recommendation = 'Information Gain Tree is recommended for balanced accuracy and speed.';
+                recommended = 'information';
+            }
+
+            return {
+                responses,
+                columns: numColumns,
+                avgCorrelation,
+                variance,
+                recommendation,
+                recommended
+            };
+        }
+
+        /**
+         * FEATURE 1: Enhanced Tree Generation Wizard
+         * Shows interactive modal with algorithm previews, pros/cons, and data statistics
+         * @param {Array<Object>} data - Survey data to analyze
+         */
         function showTreeGenerationOptions(data) {
             const modal = document.createElement('div');
-            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000; display: flex; align-items: center; justify-content: center;';
-            
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 3000; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 20px;';
+
             const content = document.createElement('div');
-            content.style.cssText = 'background: white; padding: 30px; border-radius: 20px; width: 600px; max-width: 90%; box-shadow: 0 20px 40px rgba(0, 57, 166, 0.3);';
-            
+            content.style.cssText = 'background: white; padding: 40px; border-radius: 20px; width: 900px; max-width: 95%; box-shadow: 0 20px 60px rgba(0, 57, 166, 0.4);';
+
+            // Analyze the data
+            const dataStats = analyzeDataForTreeGeneration(data);
+
             content.innerHTML = `
-                <h2 style="margin-bottom: 20px; background: linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Generate Tree from Data</h2>
-                <p style="color: #666; margin-bottom: 20px;">No tree structure found. Choose a method to automatically generate a tree from your survey data:</p>
+                <h2 style="margin-bottom: 10px; background: linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 28px;">🧙‍♂️ Tree Generation Wizard</h2>
+                <p style="color: #666; margin-bottom: 25px; font-size: 15px;">Choose the best algorithm for your ${dataStats.responses} responses across ${dataStats.columns} variables</p>
+
+                <div style="background: linear-gradient(135deg, #f0f8ff, #e6f2ff); padding: 20px; border-radius: 12px; margin-bottom: 25px; border-left: 4px solid var(--gsu-primary);">
+                    <h3 style="margin: 0 0 12px 0; color: #0039A6; font-size: 16px;">📊 Your Data Summary</h3>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; font-size: 14px;">
+                        <div><strong>Responses:</strong> ${dataStats.responses}</div>
+                        <div><strong>Variables:</strong> ${dataStats.columns}</div>
+                        <div><strong>Avg Correlation:</strong> ${dataStats.avgCorrelation.toFixed(3)}</div>
+                        <div><strong>Data Variance:</strong> ${dataStats.variance > 1 ? 'High' : 'Low'}</div>
+                    </div>
+                    <div style="margin-top: 12px; padding: 10px; background: white; border-radius: 6px; font-size: 13px;">
+                        <strong>💡 Recommendation:</strong> ${dataStats.recommendation}
+                    </div>
+                </div>
+
+                <p style="color: #444; margin-bottom: 20px; font-weight: 500; font-size: 16px;">Select an algorithm:</p>
                 
-                <div style="display: flex; flex-direction: column; gap: 15px; margin: 20px 0;">
-                    <button onclick="generateTreeFromData('correlation')" style="padding: 15px; background: linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant)); color: white; border: none; border-radius: 10px; cursor: pointer; text-align: left;">
-                        <strong>Correlation Graph → MST</strong><br>
-                        <small style="opacity: 0.9;">Build minimum spanning tree from correlation matrix (best for related questions)</small>
-                    </button>
-                    
-                    <button onclick="generateTreeFromData('information')" style="padding: 15px; background: linear-gradient(135deg, var(--gsu-vibrant), var(--gsu-light-blue)); color: white; border: none; border-radius: 10px; cursor: pointer; text-align: left;">
-                        <strong>Information Gain Splitting</strong><br>
-                        <small style="opacity: 0.9;">Use Shannon entropy to find optimal decision boundaries (best for predictive trees)</small>
-                    </button>
-                    
-                    <button onclick="generateTreeFromData('clustering')" style="padding: 15px; background: linear-gradient(135deg, var(--gsu-success), #0ec775); color: white; border: none; border-radius: 10px; cursor: pointer; text-align: left;">
-                        <strong>Spectral Clustering</strong><br>
-                        <small style="opacity: 0.9;">Group similar response patterns hierarchically (best for exploratory analysis)</small>
-                    </button>
-                    
-                    <button onclick="generateTreeFromData('hybrid')" style="padding: 15px; background: linear-gradient(135deg, #FF6B6B, #FFE66D); color: white; border: none; border-radius: 10px; cursor: pointer; text-align: left;">
-                        <strong>Hybrid KNN + Graph Theory</strong><br>
-                        <small style="opacity: 0.9;">Combine correlation, information gain, and k-nearest neighbors (most comprehensive)</small>
-                    </button>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0;">
+                    <!-- Algorithm 1 -->
+                    <div onclick="generateTreeFromData('correlation')" style="padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.2s; position: relative;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">📊 Correlation Matrix MST</div>
+                        <div style="font-size: 13px; opacity: 0.95; margin-bottom: 12px;">Builds tree from correlation relationships using Kruskal's algorithm</div>
+                        <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px;">
+                            <div>✅ Best for: Related variables</div>
+                            <div>✅ Fast computation</div>
+                            <div>⚠️ Needs: 2+ variables</div>
+                        </div>
+                        <div style="font-size: 11px; opacity: 0.8;">Complexity: O(n² log n)</div>
+                    </div>
+
+                    <!-- Algorithm 2 -->
+                    <div onclick="generateTreeFromData('information')" style="padding: 20px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">📈 Information Gain Tree ${dataStats.recommended === 'information' ? '⭐' : ''}</div>
+                        <div style="font-size: 13px; opacity: 0.95; margin-bottom: 12px;">Uses Shannon entropy to maximize information gain at each split</div>
+                        <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px;">
+                            <div>✅ Best for: Predictive trees</div>
+                            <div>✅ High accuracy</div>
+                            <div>⚠️ Slower for large data</div>
+                        </div>
+                        <div style="font-size: 11px; opacity: 0.8;">Complexity: O(n² m)</div>
+                    </div>
+
+                    <!-- Algorithm 3 -->
+                    <div onclick="generateTreeFromData('clustering')" style="padding: 20px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">🎯 Spectral Clustering</div>
+                        <div style="font-size: 13px; opacity: 0.95; margin-bottom: 12px;">Groups similar patterns hierarchically for exploration</div>
+                        <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px;">
+                            <div>✅ Best for: Discovery</div>
+                            <div>✅ Finds hidden patterns</div>
+                            <div>⚠️ Requires tuning</div>
+                        </div>
+                        <div style="font-size: 11px; opacity: 0.8;">Complexity: O(n³)</div>
+                    </div>
+
+                    <!-- Algorithm 4 -->
+                    <div onclick="generateTreeFromData('hybrid')" style="padding: 20px; background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">🚀 Hybrid Ensemble ${dataStats.recommended === 'hybrid' ? '⭐' : ''}</div>
+                        <div style="font-size: 13px; opacity: 0.95; margin-bottom: 12px;">Combines correlation, info gain, and KNN for best results</div>
+                        <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px;">
+                            <div>✅ Best for: Maximum accuracy</div>
+                            <div>✅ Most comprehensive</div>
+                            <div>⚠️ Slowest option</div>
+                        </div>
+                        <div style="font-size: 11px; opacity: 0.8;">Complexity: O(n³)</div>
+                    </div>
                 </div>
                 
                 <div style="display: flex; gap: 10px; margin-top: 20px;">
@@ -6325,9 +6450,30 @@ You can now:
             alert(`Tree generated using ${method} method with ${treeBuilder.nodes.size} nodes!`);
         }
 
-        // Method 1: Correlation-based Minimum Spanning Tree
+        /**
+         * Method 1: Correlation-based Minimum Spanning Tree
+         * Builds tree by finding highly correlated questions using Kruskal's MST algorithm
+         * @param {Array<Object>} data - Survey data array
+         */
         function generateCorrelationTree(data) {
+            // Edge case: Empty or invalid data
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                alert('No data available for tree generation');
+                return;
+            }
+            // Edge case: Missing first row
+            if (!data[0]) {
+                alert('Invalid data format');
+                return;
+            }
+
             const columns = Object.keys(data[0]).filter(key => typeof data[0][key] === 'number');
+
+            // Edge case: Not enough numeric columns
+            if (columns.length < 2) {
+                alert('Need at least 2 numeric columns to build a correlation tree');
+                return;
+            }
             
             // Calculate correlation matrix
             const correlations = {};
@@ -6448,9 +6594,30 @@ You can now:
             });
         }
 
-        // Method 2: Information Gain Tree
+        /**
+         * Method 2: Information Gain Tree using Shannon Entropy
+         * Builds tree by maximizing information gain at each split
+         * @param {Array<Object>} data - Survey data array
+         */
         function generateInformationGainTree(data) {
+            // Edge case: Empty or invalid data
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                alert('No data available for tree generation');
+                return;
+            }
+            // Edge case: Missing first row
+            if (!data[0]) {
+                alert('Invalid data format');
+                return;
+            }
+
             const columns = Object.keys(data[0]).filter(key => typeof data[0][key] === 'number');
+
+            // Edge case: Not enough columns
+            if (columns.length === 0) {
+                alert('No numeric columns found in data');
+                return;
+            }
             
             // Recursive function to build tree
             function buildInfoGainNode(remainingCols, dataSubset, depth = 0) {
@@ -6466,7 +6633,10 @@ You can now:
                 for (const col of remainingCols) {
                     const values = dataSubset.map(row => row[col] || 0);
                     const thresholds = [...new Set(values)].sort((a, b) => a - b);
-                    
+
+                    // Edge case: Not enough unique values to split
+                    if (thresholds.length < 2) continue;
+
                     for (let i = 0; i < thresholds.length - 1; i++) {
                         const threshold = (thresholds[i] + thresholds[i + 1]) / 2;
                         const gain = calculateInformationGain(dataSubset, col, threshold);
@@ -6681,8 +6851,21 @@ You can now:
             generateInformationGainTree(data);
         }
 
+        /**
+         * Process batch survey data through the decision tree
+         * @param {Array<Object>} data - Array of survey responses
+         */
         function processSurveyDataBatch(data) {
-            if (!data || !Array.isArray(data)) return;
+            // Edge case: Invalid data
+            if (!data || !Array.isArray(data)) {
+                console.warn('processSurveyDataBatch: Invalid data format');
+                return;
+            }
+            // Edge case: Empty data
+            if (data.length === 0) {
+                console.warn('processSurveyDataBatch: No data to process');
+                return;
+            }
             
             window.batchResults = [];
             
@@ -6703,7 +6886,7 @@ You can now:
                 while (currentNode && keyIndex < scoreKeys.length) {
                     // Try to find a matching score in the response
                     let score = null;
-                    
+
                     // First try exact match with node question
                     if (response[currentNode.question] !== undefined) {
                         score = parseFloat(response[currentNode.question]);
@@ -6713,12 +6896,12 @@ You can now:
                         score = parseFloat(response[scoreKeys[keyIndex]]);
                         keyIndex++;
                     }
-                    
-                    // Default to 0 if no score found
-                    if (score === null || isNaN(score)) {
+
+                    // Edge case: Invalid score - ensure it's a valid number
+                    if (score === null || isNaN(score) || !isFinite(score)) {
                         score = 0;
                     }
-                    
+
                     result.path.push({
                         nodeId: currentNode.id,
                         question: currentNode.question,
@@ -6839,8 +7022,17 @@ You can now:
         let animationSpeed = 500;
         let autoSaveInterval = null;
 
+        /**
+         * Export tree visualization as PNG image
+         */
         window.exportVisualizationAsPNG = function() {
             const svg = document.getElementById('tree-svg');
+            // Edge case: SVG element doesn't exist
+            if (!svg) {
+                alert('No visualization found. Please create a tree first.');
+                return;
+            }
+
             const svgData = new XMLSerializer().serializeToString(svg);
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -6869,7 +7061,271 @@ You can now:
         window.exportVisualizationAsPDF = () => alert('PDF export coming soon! Use PNG export for now.');
         window.exportFullReport = () => alert('Full report generation coming soon!');
         window.compareDatasets = () => alert('Dataset comparison coming soon!');
-        window.showAdvancedMetrics = () => alert('Advanced metrics dashboard coming soon!');
+
+        /**
+         * FEATURE 5: Tree Quality Validator
+         * Analyzes tree structure for common issues and provides actionable feedback
+         */
+        window.showAdvancedMetrics = function() {
+            const validationResults = validateTreeQuality();
+            displayTreeValidationModal(validationResults);
+        };
+
+        /**
+         * Validate tree structure and identify issues
+         * @returns {{score: number, issues: Array, warnings: Array, suggestions: Array, stats: Object}}
+         */
+        function validateTreeQuality() {
+            const issues = [];
+            const warnings = [];
+            const suggestions = [];
+            const stats = {
+                totalNodes: treeBuilder.nodes.size,
+                maxDepth: treeBuilder.layers.length,
+                leafNodes: 0,
+                branchNodes: 0,
+                orphanedNodes: 0,
+                circularRefs: 0
+            };
+
+            // Edge case: Empty tree
+            if (treeBuilder.nodes.size === 0) {
+                issues.push({
+                    type: 'CRITICAL',
+                    title: 'Empty Tree',
+                    description: 'No nodes in tree. Create nodes to build your decision tree.',
+                    fix: 'Click "Add Root" or import tree data.'
+                });
+                return { score: 0, issues, warnings, suggestions, stats };
+            }
+
+            // Check 1: Orphaned nodes (nodes not connected to root)
+            const connectedNodes = new Set();
+            function markConnected(node) {
+                if (!node || connectedNodes.has(node.id)) return;
+                connectedNodes.add(node.id);
+                if (node.left) markConnected(node.left);
+                if (node.right) markConnected(node.right);
+            }
+            const root = treeBuilder.layers[0]?.nodes[0];
+            if (root) markConnected(root);
+
+            treeBuilder.nodes.forEach(node => {
+                if (!connectedNodes.has(node.id)) {
+                    stats.orphanedNodes++;
+                    warnings.push({
+                        type: 'WARNING',
+                        title: `Orphaned Node: "${node.question}"`,
+                        description: 'This node is not connected to the tree root.',
+                        fix: 'Delete or reconnect this node to the main tree.'
+                    });
+                }
+            });
+
+            // Check 2: Circular references
+            const visiting = new Set();
+            const visited = new Set();
+            function detectCycle(node) {
+                if (!node) return false;
+                if (visited.has(node.id)) return false;
+                if (visiting.has(node.id)) {
+                    stats.circularRefs++;
+                    return true;
+                }
+
+                visiting.add(node.id);
+                const leftCycle = node.left ? detectCycle(node.left) : false;
+                const rightCycle = node.right ? detectCycle(node.right) : false;
+                visiting.delete(node.id);
+                visited.add(node.id);
+
+                return leftCycle || rightCycle;
+            }
+
+            if (root && detectCycle(root)) {
+                issues.push({
+                    type: 'CRITICAL',
+                    title: 'Circular Reference Detected',
+                    description: 'Tree contains a loop. This will cause infinite traversal.',
+                    fix: 'Remove the circular connection between nodes.'
+                });
+            }
+
+            // Check 3: Leaf vs branch nodes
+            treeBuilder.nodes.forEach(node => {
+                if (!node.left && !node.right) {
+                    stats.leafNodes++;
+                } else {
+                    stats.branchNodes++;
+                }
+            });
+
+            // Check 4: Unbalanced branches
+            if (stats.branchNodes > 0) {
+                let unbalancedCount = 0;
+                treeBuilder.nodes.forEach(node => {
+                    if ((node.left && !node.right) || (!node.left && node.right)) {
+                        unbalancedCount++;
+                    }
+                });
+
+                if (unbalancedCount > stats.branchNodes * 0.5) {
+                    warnings.push({
+                        type: 'WARNING',
+                        title: 'Unbalanced Tree',
+                        description: `${unbalancedCount} nodes have only one branch. This may affect user experience.`,
+                        fix: 'Consider adding branches to create more decision paths.'
+                    });
+                }
+            }
+
+            // Check 5: Excessive depth
+            if (stats.maxDepth > 10) {
+                warnings.push({
+                    type: 'WARNING',
+                    title: 'Deep Tree Structure',
+                    description: `Tree has ${stats.maxDepth} layers. Users may find this tiring.`,
+                    fix: 'Consider consolidating questions or creating multiple smaller trees.'
+                });
+            }
+
+            // Check 6: No leaf nodes
+            if (stats.leafNodes === 0 && stats.totalNodes > 0) {
+                issues.push({
+                    type: 'ERROR',
+                    title: 'No Leaf Nodes',
+                    description: 'Tree has no endpoints. Users cannot complete the survey.',
+                    fix: 'Ensure some nodes do not have children.'
+                });
+            }
+
+            // Suggestions
+            if (stats.totalNodes < 3) {
+                suggestions.push({
+                    type: 'INFO',
+                    title: 'Small Tree',
+                    description: 'Tree has few nodes. Consider adding more questions for better insights.',
+                    fix: 'Add 5-10 nodes for optimal data collection.'
+                });
+            }
+
+            if (stats.leafNodes > stats.totalNodes * 0.7) {
+                suggestions.push({
+                    type: 'INFO',
+                    title: 'Many Endpoints',
+                    description: 'Most nodes are leaf nodes. Tree may be too shallow.',
+                    fix: 'Add branching to create deeper decision paths.'
+                });
+            }
+
+            // Calculate quality score (0-100)
+            let score = 100;
+            score -= issues.length * 30;
+            score -= warnings.length * 10;
+            score -= suggestions.length * 5;
+            score = Math.max(0, Math.min(100, score));
+
+            return { score, issues, warnings, suggestions, stats };
+        }
+
+        /**
+         * Display tree validation results in a modal
+         * @param {{score: number, issues: Array, warnings: Array, suggestions: Array, stats: Object}} results
+         */
+        function displayTreeValidationModal(results) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 5000; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 20px;';
+
+            const content = document.createElement('div');
+            content.style.cssText = 'background: white; padding: 40px; border-radius: 20px; width: 800px; max-width: 95%; max-height: 90vh; overflow-y: auto;';
+
+            const scoreColor = results.score > 80 ? '#27ae60' : results.score > 50 ? '#f39c12' : '#e74c3c';
+
+            let html = `
+                <h2 style="margin-bottom: 10px;">✅ Tree Quality Validator</h2>
+                <p style="color: #666; margin-bottom: 25px;">Comprehensive analysis of your decision tree structure</p>
+
+                <div style="background: linear-gradient(135deg, ${scoreColor}, ${scoreColor}dd); padding: 30px; border-radius: 15px; text-align: center; margin-bottom: 25px; color: white;">
+                    <div style="font-size: 48px; font-weight: bold; margin-bottom: 10px;">${results.score}</div>
+                    <div style="font-size: 18px;">Quality Score / 100</div>
+                </div>
+
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 25px;">
+                    <h3 style="margin: 0 0 15px 0;">📊 Tree Statistics</h3>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                        <div><strong>Total Nodes:</strong> ${results.stats.totalNodes}</div>
+                        <div><strong>Max Depth:</strong> ${results.stats.maxDepth} layers</div>
+                        <div><strong>Leaf Nodes:</strong> ${results.stats.leafNodes}</div>
+                        <div><strong>Branch Nodes:</strong> ${results.stats.branchNodes}</div>
+                        <div><strong>Orphaned:</strong> ${results.stats.orphanedNodes}</div>
+                        <div><strong>Circular Refs:</strong> ${results.stats.circularRefs}</div>
+                    </div>
+                </div>
+            `;
+
+            // Issues
+            if (results.issues.length > 0) {
+                html += '<h3 style="color: #e74c3c; margin-top: 25px;">🔴 Critical Issues</h3>';
+                results.issues.forEach(issue => {
+                    html += `
+                        <div style="background: #fee; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #e74c3c;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">${issue.title}</div>
+                            <div style="font-size: 14px; margin-bottom: 8px;">${issue.description}</div>
+                            <div style="font-size: 13px; color: #c0392b;"><strong>Fix:</strong> ${issue.fix}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            // Warnings
+            if (results.warnings.length > 0) {
+                html += '<h3 style="color: #f39c12; margin-top: 25px;">🟡 Warnings</h3>';
+                results.warnings.forEach(warning => {
+                    html += `
+                        <div style="background: #ffc; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #f39c12;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">${warning.title}</div>
+                            <div style="font-size: 14px; margin-bottom: 8px;">${warning.description}</div>
+                            <div style="font-size: 13px; color: #d68910;"><strong>Fix:</strong> ${warning.fix}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            // Suggestions
+            if (results.suggestions.length > 0) {
+                html += '<h3 style="color: #3498db; margin-top: 25px;">💡 Suggestions</h3>';
+                results.suggestions.forEach(suggestion => {
+                    html += `
+                        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #3498db;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">${suggestion.title}</div>
+                            <div style="font-size: 14px; margin-bottom: 8px;">${suggestion.description}</div>
+                            <div style="font-size: 13px; color: #2980b9;"><strong>Tip:</strong> ${suggestion.fix}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            // All good
+            if (results.issues.length === 0 && results.warnings.length === 0 && results.suggestions.length === 0) {
+                html += `
+                    <div style="background: #d4edda; padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center; border: 2px solid #28a745;">
+                        <div style="font-size: 48px; margin-bottom: 10px;">🎉</div>
+                        <div style="font-size: 20px; font-weight: bold; color: #155724;">Perfect Tree Structure!</div>
+                        <div style="margin-top: 10px; color: #155724;">Your tree has no issues, warnings, or suggested improvements.</div>
+                    </div>
+                `;
+            }
+
+            html += `
+                <div style="margin-top: 25px; text-align: center;">
+                    <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" style="padding: 12px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px;">Close</button>
+                </div>
+            `;
+
+            content.innerHTML = html;
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+        }
 
         window.shareTree = function() {
             const treeData = treeBuilder.exportTreeData();
