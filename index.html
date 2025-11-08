@@ -4019,7 +4019,9 @@ You can now:
             `;
             
             Object.entries(pathCounts).sort((a, b) => b[1] - a[1]).forEach(([path, count]) => {
-                const percentage = ((count / results.length) * 100).toFixed(1);
+                const percentage = results.length > 0
+                    ? ((count / results.length) * 100).toFixed(1)
+                    : '0.0';
                 html += `
                     <tr>
                         <td style="padding: 10px; border: 1px solid #ddd;">${path}</td>
@@ -4043,10 +4045,15 @@ You can now:
             `;
             
             Object.entries(nodeScores).forEach(([nodeId, data]) => {
+                // Validate scores array before calculations
+                if (!Array.isArray(data.scores) || data.scores.length === 0) {
+                    return; // Skip nodes with no data
+                }
+
                 const avg = (data.scores.reduce((a, b) => a + b, 0) / data.scores.length).toFixed(2);
                 const min = Math.min(...data.scores).toFixed(1);
                 const max = Math.max(...data.scores).toFixed(1);
-                
+
                 html += `
                     <tr>
                         <td style="padding: 10px; border: 1px solid #ddd;">${data.question}</td>
@@ -4359,7 +4366,9 @@ You can now:
                 overallStdDev: calculateStdDev(allScores).toFixed(2),
                 overallMedian: calculateMedian(allScores).toFixed(2),
                 uniquePaths: Object.keys(pathGroups).length,
-                avgPathLength: (window.batchResults.reduce((sum, r) => sum + r.path.length, 0) / window.batchResults.length).toFixed(2),
+                avgPathLength: window.batchResults.length > 0
+                    ? (window.batchResults.reduce((sum, r) => sum + r.path.length, 0) / window.batchResults.length).toFixed(2)
+                    : '0.00',
                 completionRate: '100%' // All uploaded responses are complete
             };
 
@@ -4369,25 +4378,67 @@ You can now:
             return stats;
         }
 
+        /**
+         * Calculates sample standard deviation using Bessel's correction (n-1).
+         * Uses unbiased estimator: s = √[Σ(xi - x̄)² / (n-1)]
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Sample standard deviation (0 for n < 2)
+         */
         function calculateStdDev(values) {
-            const mean = values.reduce((a, b) => a + b, 0) / values.length;
-            const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
-            return Math.sqrt(variance);
+            if (!Array.isArray(values) || values.length < 2) {
+                return 0; // Need at least 2 values for sample std dev
+            }
+
+            const n = values.length;
+            const mean = values.reduce((a, b) => a + b, 0) / n;
+            const sumSquaredDiff = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0);
+
+            // Use Bessel's correction (n-1) for unbiased sample variance
+            const sampleVariance = sumSquaredDiff / (n - 1);
+
+            return Math.sqrt(sampleVariance);
         }
 
+        /**
+         * Calculates the median (50th percentile) of an array.
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Median value (0 for empty arrays)
+         */
         function calculateMedian(values) {
+            if (!Array.isArray(values) || values.length === 0) {
+                return 0;
+            }
+
             const sorted = [...values].sort((a, b) => a - b);
             const mid = Math.floor(sorted.length / 2);
             return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
         }
 
+        /**
+         * Calculates the mode (most frequent value) of an array.
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {string} Comma-separated mode values, or 'N/A' for empty arrays
+         */
         function calculateMode(values) {
+            if (!Array.isArray(values) || values.length === 0) {
+                return 'N/A';
+            }
+
             const counts = {};
             values.forEach(v => {
-                const rounded = v.toFixed(1);
-                counts[rounded] = (counts[rounded] || 0) + 1;
+                if (typeof v === 'number' && isFinite(v)) {
+                    const rounded = v.toFixed(1);
+                    counts[rounded] = (counts[rounded] || 0) + 1;
+                }
             });
-            
+
+            if (Object.keys(counts).length === 0) {
+                return 'N/A';
+            }
+
             let maxCount = 0;
             let modes = [];
             Object.entries(counts).forEach(([value, count]) => {
@@ -4398,15 +4449,25 @@ You can now:
                     modes.push(value);
                 }
             });
-            
-            return modes.join(', ');
+
+            return modes.length > 0 ? modes.join(', ') : 'N/A';
         }
 
+        /**
+         * Calculates quartiles (Q1, Q3) and interquartile range (IQR).
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {Object} Object with q1, q3, and iqr properties
+         */
         function calculateQuartiles(values) {
+            if (!Array.isArray(values) || values.length === 0) {
+                return { q1: '0.00', q3: '0.00', iqr: '0.00' };
+            }
+
             const sorted = [...values].sort((a, b) => a - b);
             const q1Index = Math.floor(sorted.length * 0.25);
             const q3Index = Math.floor(sorted.length * 0.75);
-            
+
             return {
                 q1: sorted[q1Index].toFixed(2),
                 q3: sorted[q3Index].toFixed(2),
@@ -4414,30 +4475,93 @@ You can now:
             };
         }
 
+        /**
+         * Calculates sample skewness using adjusted Fisher-Pearson coefficient.
+         * Formula: g₁ = [n/((n-1)(n-2))] × Σ[(xi - x̄)/s]³
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Sample skewness (0 for n < 3 or zero variance)
+         */
         function calculateSkewness(values) {
+            if (!Array.isArray(values) || values.length < 3) {
+                return 0; // Need at least 3 values for sample skewness
+            }
+
             const n = values.length;
             const mean = values.reduce((a, b) => a + b, 0) / n;
+            const m2 = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+
+            // Check for zero variance (constant values)
+            if (m2 === 0 || !isFinite(m2)) {
+                return 0;
+            }
+
             const m3 = values.reduce((a, b) => a + Math.pow(b - mean, 3), 0) / n;
-            const m2 = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
-            return m3 / Math.pow(m2, 1.5);
+            const denominator = Math.pow(m2, 1.5);
+
+            if (denominator === 0 || !isFinite(denominator)) {
+                return 0;
+            }
+
+            const skewness = m3 / denominator;
+            return isFinite(skewness) ? skewness : 0;
         }
 
+        /**
+         * Calculates sample excess kurtosis (Fisher's definition, normal = 0).
+         * Formula: g₂ = [m₄/m₂²] - 3
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Excess kurtosis (0 for n < 4 or zero variance)
+         */
         function calculateKurtosis(values) {
+            if (!Array.isArray(values) || values.length < 4) {
+                return 0; // Need at least 4 values for sample kurtosis
+            }
+
             const n = values.length;
             const mean = values.reduce((a, b) => a + b, 0) / n;
-            const m4 = values.reduce((a, b) => a + Math.pow(b - mean, 4), 0) / n;
             const m2 = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
-            return (m4 / Math.pow(m2, 2)) - 3;
+
+            // Check for zero variance (constant values)
+            if (m2 === 0 || !isFinite(m2)) {
+                return 0;
+            }
+
+            const m4 = values.reduce((a, b) => a + Math.pow(b - mean, 4), 0) / n;
+            const denominator = Math.pow(m2, 2);
+
+            if (denominator === 0 || !isFinite(denominator)) {
+                return 0;
+            }
+
+            const kurtosis = (m4 / denominator) - 3;
+            return isFinite(kurtosis) ? kurtosis : 0;
         }
 
+        /**
+         * Calculates confidence interval for sample mean.
+         * Uses z = 1.96 for 95% confidence (normal approximation).
+         *
+         * @param {number[]} values - Array of numeric values
+         * @param {number} confidence - Confidence level (default 0.95)
+         * @returns {Object} Object with lower and upper bounds
+         */
         function calculateConfidenceInterval(values, confidence = 0.95) {
+            if (!Array.isArray(values) || values.length < 2) {
+                return { lower: '0.00', upper: '0.00' };
+            }
+
             const mean = values.reduce((a, b) => a + b, 0) / values.length;
             const stdErr = calculateStdDev(values) / Math.sqrt(values.length);
-            const z = 1.96; // For 95% confidence
-            
+            const z = 1.96; // For 95% confidence interval
+
+            const lower = mean - z * stdErr;
+            const upper = mean + z * stdErr;
+
             return {
-                lower: (mean - z * stdErr).toFixed(2),
-                upper: (mean + z * stdErr).toFixed(2)
+                lower: isFinite(lower) ? lower.toFixed(2) : '0.00',
+                upper: isFinite(upper) ? upper.toFixed(2) : '0.00'
             };
         }
 
@@ -4484,18 +4608,46 @@ You can now:
             return correlations;
         }
 
+        /**
+         * Calculates Pearson correlation coefficient between two variables.
+         * Formula: r = [n∑xy - ∑x∑y] / √[(n∑x² - (∑x)²)(n∑y² - (∑y)²)]
+         *
+         * @param {number[]} x - First variable array
+         * @param {number[]} y - Second variable array
+         * @returns {number} Correlation coefficient in range [-1, 1] (0 for invalid inputs)
+         */
         function calculatePearsonCorrelation(x, y) {
+            // Validate inputs
+            if (!Array.isArray(x) || !Array.isArray(y) || x.length !== y.length || x.length < 2) {
+                return 0;
+            }
+
             const n = x.length;
             const sumX = x.reduce((a, b) => a + b, 0);
             const sumY = y.reduce((a, b) => a + b, 0);
             const sumXY = x.reduce((total, xi, i) => total + xi * y[i], 0);
             const sumX2 = x.reduce((a, b) => a + b * b, 0);
             const sumY2 = y.reduce((a, b) => a + b * b, 0);
-            
+
             const numerator = n * sumXY - sumX * sumY;
-            const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-            
-            return denominator === 0 ? 0 : numerator / denominator;
+            const varianceX = n * sumX2 - sumX * sumX;
+            const varianceY = n * sumY2 - sumY * sumY;
+
+            // Check for zero or negative variance (constant values or numerical errors)
+            if (varianceX <= 0 || varianceY <= 0) {
+                return 0;
+            }
+
+            const denominator = Math.sqrt(varianceX * varianceY);
+
+            if (denominator === 0 || !isFinite(denominator)) {
+                return 0;
+            }
+
+            const correlation = numerator / denominator;
+
+            // Clamp to [-1, 1] to handle floating-point precision errors
+            return Math.max(-1, Math.min(1, isFinite(correlation) ? correlation : 0));
         }
 
         function displayStatisticalAnalysisModal(stats) {
@@ -4918,12 +5070,17 @@ You can now:
                 pathDistribution[pathKey] = (pathDistribution[pathKey] || 0) + 1;
             });
             
-            const pathProbabilities = Object.values(pathDistribution).map(count => 
-                count / window.batchResults.length
-            );
-            analysis.pathEntropy = -pathProbabilities.reduce((sum, p) => 
-                sum + (p > 0 ? p * Math.log2(p) : 0), 0
-            );
+            // Calculate path entropy H(X) = -Σ p(x) log₂ p(x)
+            if (window.batchResults.length > 0) {
+                const pathProbabilities = Object.values(pathDistribution).map(count =>
+                    count / window.batchResults.length
+                );
+                analysis.pathEntropy = -pathProbabilities.reduce((sum, p) =>
+                    sum + (p > 0 ? p * Math.log2(p) : 0), 0
+                );
+            } else {
+                analysis.pathEntropy = 0;
+            }
 
             // Calculate surprise for each score value and path
             const scoreOccurrences = {};
@@ -4943,35 +5100,50 @@ You can now:
             const totalScores = window.batchResults.reduce((sum, r) => sum + r.path.length, 0);
 
             // Calculate surprise for each score value
-            Object.entries(scoreOccurrences).forEach(([score, count]) => {
-                const probability = count / totalScores;
-                const surprise = -Math.log2(probability);
-                analysis.surprise[`score_${score}`] = {
-                    value: parseInt(score),
-                    probability: probability,
-                    surprise: surprise,
-                    occurrences: count,
-                    interpretation: surprise > 4 ? 'Very surprising' : 
-                                  surprise > 2 ? 'Moderately surprising' : 
-                                  surprise > 1 ? 'Slightly surprising' : 'Expected'
-                };
-                totalSurprise += surprise * count;
-                surpriseCount += count;
-            });
+            if (totalScores > 0) {
+                Object.entries(scoreOccurrences).forEach(([score, count]) => {
+                    const probability = count / totalScores;
+
+                    // Shannon surprise: I(x) = -log₂(p(x))
+                    // Only calculate if probability is valid
+                    const surprise = (probability > 0 && probability <= 1)
+                        ? -Math.log2(probability)
+                        : 0;
+
+                    analysis.surprise[`score_${score}`] = {
+                        value: parseInt(score),
+                        probability: probability,
+                        surprise: surprise,
+                        occurrences: count,
+                        interpretation: surprise > 4 ? 'Very surprising' :
+                                      surprise > 2 ? 'Moderately surprising' :
+                                      surprise > 1 ? 'Slightly surprising' : 'Expected'
+                    };
+                    totalSurprise += surprise * count;
+                    surpriseCount += count;
+                });
+            }
 
             // Calculate surprise for each path
-            Object.entries(pathDistribution).forEach(([path, count]) => {
-                const probability = count / window.batchResults.length;
-                const surprise = -Math.log2(probability);
-                pathSurprises[path] = {
-                    probability: probability,
-                    surprise: surprise,
-                    occurrences: count,
-                    interpretation: surprise > 5 ? 'Extremely rare path' :
-                                  surprise > 3 ? 'Uncommon path' :
-                                  surprise > 1 ? 'Moderate frequency' : 'Common path'
-                };
-            });
+            if (window.batchResults.length > 0) {
+                Object.entries(pathDistribution).forEach(([path, count]) => {
+                    const probability = count / window.batchResults.length;
+
+                    // Shannon surprise: I(x) = -log₂(p(x))
+                    const surprise = (probability > 0 && probability <= 1)
+                        ? -Math.log2(probability)
+                        : 0;
+
+                    pathSurprises[path] = {
+                        probability: probability,
+                        surprise: surprise,
+                        occurrences: count,
+                        interpretation: surprise > 5 ? 'Extremely rare path' :
+                                      surprise > 3 ? 'Uncommon path' :
+                                      surprise > 1 ? 'Moderate frequency' : 'Common path'
+                    };
+                });
+            }
 
             // Calculate surprise for branch decisions at each node
             treeBuilder.nodes.forEach(node => {
