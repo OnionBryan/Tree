@@ -7437,8 +7437,633 @@ You can now:
             }
         });
 
+        // ============================================================================
+        // BLOCK 9: ADVANCED LOGIC SYSTEMS INTEGRATION
+        // ============================================================================
+
+        /**
+         * Generate a unique identifier for nodes and edges
+         * @returns {string} UUID v4
+         */
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // ============================================================================
+        // Advanced Node System
+        // ============================================================================
+
+        /**
+         * AdvancedNode - Multi-paradigm node supporting various logic types
+         * Supports: decision, logic_gate, fuzzy_gate, probabilistic, multi_valued, hybrid, statistical
+         */
+        class AdvancedNode {
+            constructor(config = {}) {
+                this.id = config.id || generateUUID();
+                this.name = config.name || `Node_${this.id.substr(0, 8)}`;
+                this.layer = config.layer || 0;
+                this.position = config.position || { x: 0, y: 0 };
+                this.nodeType = config.nodeType || 'decision';
+                this.logicType = config.logicType || 'threshold';
+                this.branchCount = config.branchCount || 2;
+                this.branches = new Array(this.branchCount).fill(null);
+                this.branchLabels = config.branchLabels || this.generateDefaultLabels(this.branchCount);
+                this.branchConditions = config.branchConditions || [];
+                this.truthTable = config.truthTable || null;
+                this.fuzzyMembership = config.fuzzyMembership || null;
+                this.probabilityDistribution = config.probabilityDistribution || null;
+                this.customLogicFunction = config.customLogicFunction || null;
+                this.inputs = [];
+                this.outputs = [];
+                this.parents = [];
+                this.children = [];
+                this.scoringFunction = config.scoringFunction || 'linear';
+                this.weights = config.weights || [];
+                this.thresholds = config.thresholds || [];
+                this.bias = config.bias || 0;
+                this.state = { value: null, active: false, visited: false, locked: false, error: null };
+                this.metadata = config.metadata || {};
+                this.tags = config.tags || [];
+                this.description = config.description || '';
+                this.visual = {
+                    shape: this.determineShape(),
+                    color: config.color || this.determineColor(),
+                    size: config.size || { width: 150, height: 80 },
+                    icon: config.icon || this.determineIcon(),
+                    style: config.style || 'default'
+                };
+            }
+
+            generateDefaultLabels(count) {
+                switch(count) {
+                    case 2: return ['False', 'True'];
+                    case 3: return ['Low', 'Medium', 'High'];
+                    case 4: return ['Very Low', 'Low', 'High', 'Very High'];
+                    default: return Array.from({length: count}, (_, i) => `Branch ${i + 1}`);
+                }
+            }
+
+            determineShape() {
+                const shapeMap = {
+                    'decision': 'rectangle',
+                    'logic_gate': 'trapezoid',
+                    'fuzzy_gate': 'ellipse',
+                    'probabilistic': 'diamond',
+                    'multi_valued': 'hexagon',
+                    'statistical': 'octagon'
+                };
+                return shapeMap[this.nodeType] || 'rectangle';
+            }
+
+            determineColor() {
+                const colorMap = {
+                    'decision': '#4A90E2',
+                    'logic_gate': '#FFD700',
+                    'fuzzy_gate': '#9B59B6',
+                    'probabilistic': '#E74C3C',
+                    'multi_valued': '#2ECC71',
+                    'statistical': '#F39C12'
+                };
+                return colorMap[this.nodeType] || '#95A5A6';
+            }
+
+            determineIcon() {
+                const iconMap = {
+                    'and': '∧', 'or': '∨', 'nand': '⊼', 'nor': '⊽',
+                    'xor': '⊕', 'xnor': '⊙', 'not': '¬', 'majority': 'M',
+                    'fuzzy_min': 'MIN', 'fuzzy_max': 'MAX', 'threshold': 'θ'
+                };
+                return iconMap[this.logicType] || '';
+            }
+
+            evaluate(inputs = []) {
+                switch(this.nodeType) {
+                    case 'logic_gate': return this.evaluateLogicGate(inputs);
+                    case 'fuzzy_gate': return this.evaluateFuzzyGate(inputs);
+                    case 'probabilistic': return this.evaluateProbabilistic(inputs);
+                    case 'multi_valued': return this.evaluateMultiValued(inputs);
+                    case 'decision':
+                    default: return this.evaluateDecision(inputs);
+                }
+            }
+
+            evaluateLogicGate(inputs) {
+                if (typeof GateEvaluator !== 'undefined') {
+                    const evaluator = new GateEvaluator();
+                    try {
+                        evaluator.validateGate(this.logicType, inputs.length);
+                        if (this.truthTable) {
+                            const customGate = evaluator.createCustomGate(this.truthTable);
+                            return customGate(inputs) ? 1 : 0;
+                        }
+                        const result = evaluator.evaluate(this.logicType, inputs, { k: this.thresholdK || 1 });
+                        return typeof result === 'boolean' ? (result ? 1 : 0) : result;
+                    } catch (error) {
+                        console.error('Logic gate evaluation error:', error);
+                        return 0;
+                    }
+                }
+                return 0;
+            }
+
+            evaluateFuzzyGate(inputs) {
+                switch(this.logicType) {
+                    case 'fuzzy_min': return Math.min(...inputs);
+                    case 'fuzzy_max': return Math.max(...inputs);
+                    case 'fuzzy_product': return inputs.reduce((a, b) => a * b, 1);
+                    case 'fuzzy_sum':
+                        let sum = inputs[0] || 0;
+                        for (let i = 1; i < inputs.length; i++) {
+                            sum = sum + inputs[i] - sum * inputs[i];
+                        }
+                        return sum;
+                    case 'fuzzy_average': return inputs.reduce((a, b) => a + b, 0) / inputs.length;
+                    default: return inputs[0] || 0;
+                }
+            }
+
+            evaluateProbabilistic(inputs) {
+                if (!this.probabilityDistribution) return 0;
+                const random = Math.random();
+                let cumulative = 0;
+                for (let i = 0; i < this.probabilityDistribution.length; i++) {
+                    cumulative += this.probabilityDistribution[i];
+                    if (random <= cumulative) return i;
+                }
+                return this.probabilityDistribution.length - 1;
+            }
+
+            evaluateMultiValued(inputs) {
+                return 0; // Placeholder
+            }
+
+            evaluateDecision(inputs) {
+                if (this.customLogicFunction) {
+                    return this.customLogicFunction(inputs);
+                }
+                const sum = inputs.reduce((acc, val) => acc + val, 0);
+                const average = inputs.length > 0 ? sum / inputs.length : 0;
+                let score = average;
+                switch(this.scoringFunction) {
+                    case 'tanh': score = Math.tanh(score); break;
+                    case 'sigmoid': score = 1 / (1 + Math.exp(-score)); break;
+                    case 'relu': score = Math.max(0, score); break;
+                }
+                for (let i = 0; i < this.thresholds.length; i++) {
+                    if (score < this.thresholds[i]) return i;
+                }
+                return this.thresholds.length;
+            }
+
+            addInput(edgeId, parentNodeId) {
+                if (!this.inputs.includes(edgeId)) this.inputs.push(edgeId);
+                if (!this.parents.includes(parentNodeId)) this.parents.push(parentNodeId);
+            }
+
+            addOutput(edgeId, childNodeId) {
+                if (!this.outputs.includes(edgeId)) this.outputs.push(edgeId);
+                if (!this.children.includes(childNodeId)) this.children.push(childNodeId);
+            }
+
+            clone() {
+                return new AdvancedNode({
+                    ...this,
+                    id: generateUUID(),
+                    name: `${this.name}_copy`,
+                    inputs: [], outputs: [], parents: [], children: []
+                });
+            }
+
+            toJSON() {
+                return {
+                    id: this.id, name: this.name, layer: this.layer, position: this.position,
+                    nodeType: this.nodeType, logicType: this.logicType, branchCount: this.branchCount,
+                    branchLabels: this.branchLabels, truthTable: this.truthTable,
+                    fuzzyMembership: this.fuzzyMembership, probabilityDistribution: this.probabilityDistribution,
+                    scoringFunction: this.scoringFunction, weights: this.weights, thresholds: this.thresholds,
+                    bias: this.bias, metadata: this.metadata, visual: this.visual
+                };
+            }
+
+            static fromJSON(json) {
+                return new AdvancedNode(json);
+            }
+        }
+
+        /**
+         * Edge - Connection between nodes with logic properties
+         */
+        class Edge {
+            constructor(source, target, config = {}) {
+                this.id = config.id || generateUUID();
+                this.source = source;
+                this.target = target;
+                this.sourcePort = config.sourcePort || 0;
+                this.targetPort = config.targetPort || 0;
+                this.weight = config.weight || 1.0;
+                this.condition = config.condition || 'always';
+                this.label = config.label || '';
+                this.bidirectional = config.bidirectional || false;
+                this.operator = config.operator || 'direct';
+                this.transform = config.transform || null;
+                this.delay = config.delay || 0;
+                this.visual = {
+                    style: config.style || 'solid',
+                    color: config.color || '#666666',
+                    width: config.width || 2,
+                    animated: config.animated || false,
+                    curvature: config.curvature || 0.3
+                };
+                this.state = { active: false, value: null, flow: 0, error: null };
+                this.metadata = config.metadata || {};
+                this.tags = config.tags || [];
+            }
+
+            evaluate(inputValue) {
+                let value = inputValue * this.weight;
+                switch(this.operator) {
+                    case 'negate': value = -value; break;
+                    case 'amplify': value = value * 2; break;
+                    case 'dampen': value = value * 0.5; break;
+                }
+                if (this.transform) value = this.transform(value);
+                this.state.value = value;
+                this.state.flow = Math.abs(value);
+                return value;
+            }
+
+            checkCondition(context = {}) {
+                if (this.condition === 'always') return true;
+                if (this.condition === 'never') return false;
+                if (typeof this.condition === 'function') return this.condition(context);
+                return true;
+            }
+
+            toJSON() {
+                return {
+                    id: this.id, source: this.source, target: this.target,
+                    sourcePort: this.sourcePort, targetPort: this.targetPort,
+                    weight: this.weight, condition: this.condition, label: this.label,
+                    operator: this.operator, visual: this.visual, metadata: this.metadata
+                };
+            }
+
+            static fromJSON(json) {
+                return new Edge(json.source, json.target, json);
+            }
+        }
+
+        /**
+         * LogicGraph - Manages the overall graph structure
+         */
+        class LogicGraph {
+            constructor(config = {}) {
+                this.id = config.id || generateUUID();
+                this.name = config.name || 'Logic Graph';
+                this.version = config.version || '2.0';
+                this.nodes = new Map();
+                this.edges = new Map();
+                this.layers = [];
+                this.type = config.type || 'dag';
+                this.allowCycles = config.allowCycles || false;
+                this.maxDepth = config.maxDepth || 100;
+                this.executionMode = config.executionMode || 'sequential';
+                this.cacheResults = config.cacheResults || true;
+                this.state = { executed: false, results: new Map(), errors: [], executionTime: 0 };
+                this.metadata = config.metadata || {};
+                this.created = config.created || new Date().toISOString();
+                this.modified = new Date().toISOString();
+            }
+
+            addNode(node) {
+                if (!(node instanceof AdvancedNode)) node = new AdvancedNode(node);
+                this.nodes.set(node.id, node);
+                while (this.layers.length <= node.layer) this.layers.push([]);
+                if (!this.layers[node.layer].includes(node.id)) this.layers[node.layer].push(node.id);
+                this.modified = new Date().toISOString();
+                return node;
+            }
+
+            addEdge(source, target, config = {}) {
+                const edge = new Edge(source, target, config);
+                this.edges.set(edge.id, edge);
+                const sourceNode = this.nodes.get(source);
+                const targetNode = this.nodes.get(target);
+                if (sourceNode && targetNode) {
+                    sourceNode.addOutput(edge.id, target);
+                    targetNode.addInput(edge.id, source);
+                }
+                if (!this.allowCycles && this.detectCycle()) {
+                    this.edges.delete(edge.id);
+                    if (sourceNode) {
+                        sourceNode.outputs = sourceNode.outputs.filter(id => id !== edge.id);
+                        sourceNode.children = sourceNode.children.filter(id => id !== target);
+                    }
+                    if (targetNode) {
+                        targetNode.inputs = targetNode.inputs.filter(id => id !== edge.id);
+                        targetNode.parents = targetNode.parents.filter(id => id !== source);
+                    }
+                    throw new Error('Adding this edge would create a cycle');
+                }
+                this.modified = new Date().toISOString();
+                return edge;
+            }
+
+            detectCycle() {
+                const visited = new Set();
+                const recursionStack = new Set();
+                const hasCycleDFS = (nodeId) => {
+                    visited.add(nodeId);
+                    recursionStack.add(nodeId);
+                    const node = this.nodes.get(nodeId);
+                    if (node) {
+                        for (const childId of node.children) {
+                            if (!visited.has(childId)) {
+                                if (hasCycleDFS(childId)) return true;
+                            } else if (recursionStack.has(childId)) {
+                                return true;
+                            }
+                        }
+                    }
+                    recursionStack.delete(nodeId);
+                    return false;
+                };
+                for (const [nodeId] of this.nodes) {
+                    if (!visited.has(nodeId) && hasCycleDFS(nodeId)) return true;
+                }
+                return false;
+            }
+
+            execute(inputs = {}) {
+                const startTime = performance.now();
+                this.state.errors = [];
+                this.state.results.clear();
+                try {
+                    const executionOrder = this.allowCycles ? [...this.nodes.keys()] : this.topologicalSort();
+                    for (const nodeId of executionOrder) {
+                        const node = this.nodes.get(nodeId);
+                        if (!node) continue;
+                        const nodeInputs = [];
+                        for (const edgeId of node.inputs) {
+                            const edge = this.edges.get(edgeId);
+                            if (edge && edge.checkCondition(this.state)) {
+                                const sourceResult = this.state.results.get(edge.source) || inputs[edge.source] || 0;
+                                nodeInputs.push(edge.evaluate(sourceResult));
+                            }
+                        }
+                        try {
+                            const result = node.evaluate(nodeInputs);
+                            this.state.results.set(nodeId, result);
+                            node.state.value = result;
+                            node.state.active = true;
+                        } catch (error) {
+                            this.state.errors.push({ nodeId, error: error.message });
+                            node.state.error = error.message;
+                        }
+                    }
+                    this.state.executed = true;
+                } catch (error) {
+                    this.state.errors.push({ graph: true, error: error.message });
+                }
+                this.state.executionTime = performance.now() - startTime;
+                return this.state.results;
+            }
+
+            topologicalSort() {
+                const visited = new Set();
+                const stack = [];
+                const topSortDFS = (nodeId) => {
+                    visited.add(nodeId);
+                    const node = this.nodes.get(nodeId);
+                    if (node) {
+                        for (const childId of node.children) {
+                            if (!visited.has(childId)) topSortDFS(childId);
+                        }
+                    }
+                    stack.push(nodeId);
+                };
+                for (const [nodeId] of this.nodes) {
+                    if (!visited.has(nodeId) && this.nodes.get(nodeId).parents.length === 0) {
+                        topSortDFS(nodeId);
+                    }
+                }
+                return stack.reverse();
+            }
+
+            toJSON() {
+                return {
+                    id: this.id, name: this.name, version: this.version, type: this.type,
+                    nodes: Array.from(this.nodes.values()).map(n => n.toJSON()),
+                    edges: Array.from(this.edges.values()).map(e => e.toJSON()),
+                    metadata: this.metadata, created: this.created, modified: this.modified
+                };
+            }
+
+            static fromJSON(json) {
+                const graph = new LogicGraph({
+                    id: json.id, name: json.name, version: json.version,
+                    type: json.type, metadata: json.metadata, created: json.created
+                });
+                for (const nodeData of json.nodes) graph.addNode(AdvancedNode.fromJSON(nodeData));
+                for (const edgeData of json.edges) graph.edges.set(edgeData.id, Edge.fromJSON(edgeData));
+                return graph;
+            }
+        }
+
+        // Initialize global logic graph
+        window.logicGraph = new LogicGraph({ name: 'Main Decision Tree Graph' });
+
+        /**
+         * Show Advanced Node Creator UI
+         * @returns {void}
+         */
+        window.showAdvancedNodeCreator = function() {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 3000; overflow-y: auto;';
+
+            const content = document.createElement('div');
+            content.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 40px; border-radius: 20px; width: 800px; max-height: 90vh; overflow-y: auto;';
+
+            content.innerHTML = `
+                <h2 style="color: #0039A6; margin-bottom: 20px;">🎯 Advanced Node Creator</h2>
+                <p style="color: #666; margin-bottom: 25px;">Create multi-paradigm nodes with fuzzy logic, Boolean gates, and probabilistic behavior.</p>
+
+                <div style="margin-bottom: 25px;">
+                    <label style="display: block; margin-bottom: 10px; font-weight: bold; color: #333;">Node Type:</label>
+                    <select id="advanced-node-type" style="width: 100%; padding: 12px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px; font-size: 14px;">
+                        <option value="decision">Decision Node (Threshold-based)</option>
+                        <option value="logic_gate">Logic Gate (AND, OR, XOR, etc.)</option>
+                        <option value="fuzzy_gate">Fuzzy Logic Gate (MIN, MAX, Product)</option>
+                        <option value="probabilistic">Probabilistic Node (Random distribution)</option>
+                        <option value="multi_valued">Multi-Valued Logic (Ternary, Quaternary)</option>
+                        <option value="statistical">Statistical Node (Aggregation)</option>
+                    </select>
+                </div>
+
+                <div id="logic-type-container" style="margin-bottom: 25px; display: none;">
+                    <label style="display: block; margin-bottom: 10px; font-weight: bold; color: #333;">Logic Type:</label>
+                    <select id="advanced-logic-type" style="width: 100%; padding: 12px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px; font-size: 14px;">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 25px;">
+                    <label style="display: block; margin-bottom: 10px; font-weight: bold; color: #333;">Node Name:</label>
+                    <input type="text" id="advanced-node-name" placeholder="Enter node name..."
+                        style="width: 100%; padding: 12px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px; font-size: 14px;">
+                </div>
+
+                <div style="margin-bottom: 25px;">
+                    <label style="display: block; margin-bottom: 10px; font-weight: bold; color: #333;">Branch Count:</label>
+                    <input type="number" id="advanced-branch-count" value="2" min="2" max="10"
+                        style="width: 100%; padding: 12px; border: 2px solid rgba(0, 57, 166, 0.2); border-radius: 8px; font-size: 14px;">
+                </div>
+
+                <div style="padding: 20px; background: linear-gradient(135deg, rgba(0, 57, 166, 0.05), rgba(0, 174, 239, 0.05)); border-radius: 12px; margin-bottom: 25px;">
+                    <h3 style="color: #0039A6; margin-bottom: 10px; font-size: 16px;">Node Preview</h3>
+                    <div id="node-preview" style="display: flex; align-items: center; gap: 15px;">
+                        <div id="node-shape" style="width: 80px; height: 80px; background: #4A90E2; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold;">
+                            📊
+                        </div>
+                        <div style="flex: 1;">
+                            <div id="node-type-label" style="font-size: 18px; font-weight: bold; color: #333; margin-bottom: 5px;">Decision Node</div>
+                            <div id="node-description" style="font-size: 13px; color: #666;">Threshold-based decision making with scoring functions</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 15px; margin-top: 30px;">
+                    <button onclick="createAdvancedNode()"
+                        style="flex: 1; padding: 14px; background: linear-gradient(135deg, #0039A6, #00AEEF); color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                        ✨ Create Node
+                    </button>
+                    <button onclick="this.closest('[style*=\"z-index: 3000\"]').remove()"
+                        style="flex: 1; padding: 14px; background: #ccc; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                        Cancel
+                    </button>
+                </div>
+            `;
+
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+
+            // Setup event listeners
+            document.getElementById('advanced-node-type').addEventListener('change', updateNodePreview);
+            updateNodePreview();
+        };
+
+        /**
+         * Update node preview based on selected type
+         * @returns {void}
+         */
+        function updateNodePreview() {
+            const nodeType = document.getElementById('advanced-node-type').value;
+            const logicContainer = document.getElementById('logic-type-container');
+            const logicSelect = document.getElementById('advanced-logic-type');
+            const nodeShape = document.getElementById('node-shape');
+            const nodeLabel = document.getElementById('node-type-label');
+            const nodeDesc = document.getElementById('node-description');
+
+            const typeInfo = {
+                'decision': {
+                    icon: '📊',
+                    color: '#4A90E2',
+                    label: 'Decision Node',
+                    desc: 'Threshold-based decision making with scoring functions',
+                    showLogic: false
+                },
+                'logic_gate': {
+                    icon: '⚡',
+                    color: '#FFD700',
+                    label: 'Logic Gate',
+                    desc: 'Boolean logic operations (AND, OR, XOR, NAND, NOR, etc.)',
+                    showLogic: true,
+                    logicTypes: ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', 'majority']
+                },
+                'fuzzy_gate': {
+                    icon: '🌊',
+                    color: '#9B59B6',
+                    label: 'Fuzzy Logic Gate',
+                    desc: 'Fuzzy logic with T-norms, S-norms, and membership functions',
+                    showLogic: true,
+                    logicTypes: ['fuzzy_min', 'fuzzy_max', 'fuzzy_product', 'fuzzy_sum', 'fuzzy_average']
+                },
+                'probabilistic': {
+                    icon: '🎲',
+                    color: '#E74C3C',
+                    label: 'Probabilistic Node',
+                    desc: 'Random selection based on probability distributions',
+                    showLogic: false
+                },
+                'multi_valued': {
+                    icon: '🔢',
+                    color: '#2ECC71',
+                    label: 'Multi-Valued Logic',
+                    desc: 'Ternary, quaternary, and n-valued logic systems',
+                    showLogic: true,
+                    logicTypes: ['ternary_and', 'ternary_or', 'quaternary_and', 'quaternary_or']
+                },
+                'statistical': {
+                    icon: '📈',
+                    color: '#F39C12',
+                    label: 'Statistical Node',
+                    desc: 'Statistical aggregation and analysis',
+                    showLogic: false
+                }
+            };
+
+            const info = typeInfo[nodeType];
+            nodeShape.textContent = info.icon;
+            nodeShape.style.background = info.color;
+            nodeLabel.textContent = info.label;
+            nodeDesc.textContent = info.desc;
+
+            if (info.showLogic && info.logicTypes) {
+                logicContainer.style.display = 'block';
+                logicSelect.innerHTML = info.logicTypes.map(type =>
+                    `<option value="${type}">${type.replace(/_/g, ' ').toUpperCase()}</option>`
+                ).join('');
+            } else {
+                logicContainer.style.display = 'none';
+            }
+        }
+
+        /**
+         * Create advanced node from UI inputs
+         * @returns {void}
+         */
+        function createAdvancedNode() {
+            const nodeType = document.getElementById('advanced-node-type').value;
+            const nodeName = document.getElementById('advanced-node-name').value || `${nodeType}_node`;
+            const branchCount = parseInt(document.getElementById('advanced-branch-count').value);
+            const logicType = document.getElementById('advanced-logic-type').value || 'threshold';
+
+            const config = {
+                nodeType: nodeType,
+                name: nodeName,
+                branchCount: branchCount,
+                logicType: logicType,
+                layer: treeBuilder.layers.length
+            };
+
+            const newNode = new AdvancedNode(config);
+            window.logicGraph.addNode(newNode);
+
+            // Close modal
+            document.querySelector('[style*="z-index: 3000"]').remove();
+
+            showTemporaryNotification(`✅ Created ${nodeType} node: ${nodeName}`, 3000);
+
+            // Save to history
+            historyManager.saveState(`Created ${nodeType} node`);
+        }
+
         // ============= UI Functions for New Features =============
-        
+
         // Feature 1: Tree Templates UI
         function showTreeTemplates() {
             const modal = document.createElement('div');
