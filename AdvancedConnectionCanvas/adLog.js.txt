@@ -1,0 +1,2128 @@
+ function updateFuzzyThreshold(value) {
+            const threshold = value / 100;
+            const valueElement = document.querySelector('.fuzzy-slider .value');
+            if (valueElement) {
+                valueElement.textContent = threshold.toFixed(2);
+            }
+
+            if (window.AdvancedTreeLogic.currentNode) {
+                window.AdvancedTreeLogic.currentNode.metadata = window.AdvancedTreeLogic.currentNode.metadata || {};
+                window.AdvancedTreeLogic.currentNode.metadata.fuzzyThreshold = threshold;
+
+                // Sync with tree builder node
+                const currentNodeId = window.AdvancedTreeLogic.currentNode.id;
+                if (window.treeBuilder && window.treeBuilder.nodes.has(currentNodeId)) {
+                    const treeNode = window.treeBuilder.nodes.get(currentNodeId);
+                    if (!treeNode.metadata) treeNode.metadata = {};
+                    treeNode.metadata.fuzzyThreshold = threshold;
+                }
+            }
+        }
+
+        function updateTNorm(tNorm) {
+            if (window.AdvancedTreeLogic.currentNode) {
+                window.AdvancedTreeLogic.currentNode.metadata = window.AdvancedTreeLogic.currentNode.metadata || {};
+                window.AdvancedTreeLogic.currentNode.metadata.tNorm = tNorm;
+
+                // Sync with tree builder node
+                const currentNodeId = window.AdvancedTreeLogic.currentNode.id;
+                if (window.treeBuilder && window.treeBuilder.nodes.has(currentNodeId)) {
+                    const treeNode = window.treeBuilder.nodes.get(currentNodeId);
+                    if (!treeNode.metadata) treeNode.metadata = {};
+                    treeNode.metadata.tNorm = tNorm;
+                }
+            }
+        }
+        function updateBranchCount(count) {
+            const branchCount = parseInt(count);
+            if (!window.AdvancedTreeLogic.currentNode || branchCount < 2 || branchCount > 16) return;
+
+            window.AdvancedTreeLogic.currentNode.branchCount = branchCount;
+
+            // Sync with tree builder node
+            const currentNodeId = window.AdvancedTreeLogic.currentNode.id;
+            if (window.treeBuilder && window.treeBuilder.nodes.has(currentNodeId)) {
+                const treeNode = window.treeBuilder.nodes.get(currentNodeId);
+                treeNode.branchCount = branchCount;
+                treeNode.numBranches = branchCount;
+
+                // Update branch labels if needed
+                if (!treeNode.branchLabels || treeNode.branchLabels.length !== branchCount) {
+                    treeNode.branchLabels = Array(branchCount).fill(null).map((_, i) => `Branch ${i + 1}`);
+                }
+            }
+            window.AdvancedTreeLogic.currentNode.branches = new Array(branchCount).fill(null);
+            const labelsConfig = document.getElementById('branchLabelsConfig');
+            let html = '';
+            for (let i = 0; i < branchCount; i++) {
+                const defaultLabel = window.AdvancedTreeLogic.currentNode.branchLabels?.[i] || `Branch ${i + 1}`;
+                html += `
+                    <div style="margin-bottom: 5px;">
+                        <input type="text" value="${defaultLabel}" onchange="updateBranchLabel(${i}, this.value)" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;" placeholder="Branch ${i + 1} label">
+                    </div>
+                `;
+            }
+            labelsConfig.innerHTML = html;
+            if (window.treeBuilder) {
+                const treeNode = window.treeBuilder.nodes.get(window.AdvancedTreeLogic.currentNode.id);
+                if (treeNode) {
+                    treeNode.setBranchCount(branchCount);
+                }
+            }
+        }
+        function updateBranchLabel(index, label) {
+            if (!window.AdvancedTreeLogic.currentNode) return;
+            window.AdvancedTreeLogic.currentNode.branchLabels = window.AdvancedTreeLogic.currentNode.branchLabels || [];
+            window.AdvancedTreeLogic.currentNode.branchLabels[index] = label;
+        }
+        function toggleAdvancedFeatures(enabled) {
+            // Ensure AdvancedTreeLogic exists
+            if (!window.AdvancedTreeLogic) {
+                window.AdvancedTreeLogic = {
+                    enabled: false,  // Start disabled
+                    currentNode: null,
+                    currentGate: null,
+                    graph: null,
+                    evaluator: null,
+                    fuzzyEvaluator: null,
+                    renderer: null
+                };
+            }
+
+            // Update enabled state
+            window.AdvancedTreeLogic.enabled = enabled;
+
+            // Update settings panel UI
+            const content = document.getElementById('advancedFeaturesContent');
+            const status = document.getElementById('advancedStatus');
+
+            if (content) {
+                content.style.display = enabled ? 'block' : 'none';
+            }
+
+            if (status) {
+                status.textContent = enabled ? 'Enabled' : 'Disabled';
+                status.style.color = enabled ? '#10B981' : '#EF4444';
+                status.style.fontWeight = '600';
+            }
+
+            // Initialize advanced logic system if enabling
+            if (enabled && !window.AdvancedTreeLogic.graph) {
+                initializeAdvancedLogic();
+            }
+
+            // Update ALL toggle checkboxes (sync all instances)
+            document.querySelectorAll('input[type="checkbox"][id*="advanced"]').forEach(checkbox => {
+                if (checkbox.checked !== enabled) {
+                    checkbox.checked = enabled;
+                }
+            });
+
+            // Update global indicator with animation
+            const indicator = document.getElementById('advancedModeIndicator');
+            if (indicator) {
+                indicator.style.background = enabled ? '#10B981' : '#9CA3AF';
+                indicator.style.boxShadow = enabled ? '0 0 8px rgba(16, 185, 129, 0.8)' : 'none';
+                indicator.style.transition = 'all 0.3s ease';
+            }
+
+            // Show/hide advanced controls in all layers with animation
+            document.querySelectorAll('.layer-advanced-controls').forEach(control => {
+                control.style.display = enabled ? 'block' : 'none';
+                if (enabled) {
+                    control.style.animation = 'fadeIn 0.3s ease';
+                }
+            });
+
+            // Show/hide node advanced buttons
+            document.querySelectorAll('[id^="node-advanced-"]').forEach(advDiv => {
+                if (enabled) {
+                    // Keep existing display if already shown
+                } else {
+                    advDiv.style.display = 'none';
+                }
+            });
+
+            // Store the state in localStorage for persistence
+            if (typeof Storage !== "undefined") {
+                localStorage.setItem('advancedModeEnabled', enabled.toString());
+                console.log(`[Advanced Mode] State saved to localStorage: ${enabled}`);
+            }
+
+            // Refresh the layers display to update advanced controls visibility
+            if (window.treeBuilder && typeof window.treeBuilder.updateLayersDisplay === 'function') {
+                window.treeBuilder.updateLayersDisplay();
+            }
+
+            // Trigger visual feedback
+            showToast(
+                enabled ? 'Advanced Mode Enabled' : 'Advanced Mode Disabled',
+                enabled ? 'success' : 'info'
+            );
+
+            console.log(`[Advanced Mode] ${enabled ? 'Enabled' : 'Disabled'}`);
+        }
+
+        // Restore advanced mode state on page load
+        function restoreAdvancedModeState() {
+            if (typeof Storage !== "undefined") {
+                const savedState = localStorage.getItem('advancedModeEnabled');
+                if (savedState !== null) {
+                    const enabled = savedState === 'true';
+                    toggleAdvancedFeatures(enabled);
+                    console.log(`[Advanced Mode] Restored state from localStorage: ${enabled}`);
+                }
+            }
+        }
+
+        // Toast notification helper
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                padding: 12px 20px;
+                background: ${type === 'success' ? '#10B981' : type === 'error' ? '#EF4444' : '#6366F1'};
+                color: white;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 10000;
+                font-weight: 600;
+                animation: slideIn 0.3s ease;
+            `;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 2000);
+        }
+
+        function toggleAdvancedMode() {
+            // Ensure AdvancedTreeLogic is initialized
+            if (!window.AdvancedTreeLogic) {
+                window.AdvancedTreeLogic = {
+                    enabled: false,
+                    currentNode: null,
+                    currentGate: null,
+                    graph: null,
+                    evaluator: null,
+                    fuzzyEvaluator: null,
+                    renderer: null
+                };
+            }
+
+            // Toggle the advanced mode globally
+            const currentState = window.AdvancedTreeLogic.enabled;
+            const newState = !currentState;
+
+            toggleAdvancedFeatures(newState);
+
+            // Show or hide advanced panel based on new state
+            if (newState) {
+                showAdvancedModePanel();
+            } else {
+                hideAdvancedModePanel();
+            }
+
+            return newState;
+        }
+
+        // Show Advanced Mode Panel
+        function showAdvancedModePanel() {
+            let panel = document.getElementById('advanced-mode-panel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'advanced-mode-panel';
+                panel.style.cssText = `
+                    position: fixed;
+                    right: 20px;
+                    top: 100px;
+                    width: 320px;
+                    background: rgba(255, 255, 255, 0.95);
+                    backdrop-filter: blur(10px);
+                    border-radius: 12px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                    z-index: 1000;
+                    padding: 20px;
+                    max-height: 70vh;
+                    overflow-y: auto;
+                `;
+                document.body.appendChild(panel);
+            }
+
+            panel.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="margin: 0; color: #8B5CF6;">🔬 Advanced Mode</h3>
+                    <button onclick="hideAdvancedModePanel()" style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
+                </div>
+
+                <!-- Connection Tools -->
+                <div style="margin-bottom: 20px; padding: 12px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(99, 102, 241, 0.1)); border-radius: 8px;">
+                    <h4 style="margin: 0 0 10px 0; color: #6366F1;">Connection Tools</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <button onclick="setConnectionMode('pin')" style="padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer;">
+                            📍 Pin-to-Pin
+                        </button>
+                        <button onclick="setConnectionMode('free')" style="padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer;">
+                            ✏️ Free Draw
+                        </button>
+                        <button onclick="setConnectionMode('ortho')" style="padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer;">
+                            📐 Orthogonal
+                        </button>
+                        <button onclick="setConnectionMode('bezier')" style="padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer;">
+                            〰️ Bezier
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Logic Layers -->
+                <div style="margin-bottom: 20px; padding: 12px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.1)); border-radius: 8px;">
+                    <h4 style="margin: 0 0 10px 0; color: #10B981;">Logic Layers</h4>
+                    <div id="logic-layers-list" style="margin-bottom: 10px;">
+                        <div style="padding: 8px; background: white; border-radius: 4px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+                            <span>Layer 1 (Main)</span>
+                            <label>
+                                <input type="checkbox" checked> Visible
+                            </label>
+                        </div>
+                    </div>
+                    <button onclick="addLogicLayer()" style="width: 100%; padding: 8px; background: #10B981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                        + Add Layer
+                    </button>
+                </div>
+
+                <!-- Signal Visualization -->
+                <div style="margin-bottom: 20px; padding: 12px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(190, 24, 93, 0.1)); border-radius: 8px;">
+                    <h4 style="margin: 0 0 10px 0; color: #EC4899;">Signal Visualization</h4>
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <input type="checkbox" id="show-signal-flow" checked>
+                        Show Signal Flow
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <input type="checkbox" id="show-signal-values">
+                        Show Values
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <input type="checkbox" id="step-mode">
+                        Step-by-Step Mode
+                    </label>
+                    <div style="display: flex; gap: 8px; margin-top: 10px;">
+                        <button onclick="stepSignal()" style="flex: 1; padding: 8px; background: #EC4899; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            Step →
+                        </button>
+                        <button onclick="resetSignals()" style="flex: 1; padding: 8px; background: #6B7280; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            Reset
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quick Templates -->
+                <div style="margin-bottom: 20px; padding: 12px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(217, 119, 6, 0.1)); border-radius: 8px;">
+                    <h4 style="margin: 0 0 10px 0; color: #F59E0B;">Quick Templates</h4>
+                    <select id="logic-template" style="width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid #e5e7eb; border-radius: 4px;">
+                        <option value="">Select Template...</option>
+                        <option value="half-adder">Half Adder</option>
+                        <option value="full-adder">Full Adder</option>
+                        <option value="mux-2to1">2-to-1 Multiplexer</option>
+                        <option value="decoder-2to4">2-to-4 Decoder</option>
+                        <option value="sr-latch">SR Latch</option>
+                        <option value="d-flipflop">D Flip-Flop</option>
+                    </select>
+                    <button onclick="applyLogicTemplate()" style="width: 100%; padding: 8px; background: #F59E0B; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                        Apply Template
+                    </button>
+                </div>
+
+                <!-- Debug Console -->
+                <div style="padding: 12px; background: #f3f4f6; border-radius: 8px;">
+                    <h4 style="margin: 0 0 10px 0; color: #4B5563;">Debug Console</h4>
+                    <div id="debug-console" style="font-family: monospace; font-size: 11px; background: #1f2937; color: #10B981; padding: 8px; border-radius: 4px; height: 100px; overflow-y: auto;">
+                        &gt; Advanced mode activated<br>
+                        &gt; Ready for logic operations...
+                    </div>
+                </div>
+            `;
+
+            panel.style.display = 'block';
+        }
+
+        function hideAdvancedModePanel() {
+            const panel = document.getElementById('advanced-mode-panel');
+            if (panel) {
+                panel.style.display = 'none';
+            }
+        }
+
+        // Set connection mode from advanced panel
+        function setConnectionMode(mode) {
+            if (!window.canvasState) return;
+
+            const debugConsole = document.getElementById('debug-console');
+
+            switch(mode) {
+                case 'pin':
+                    window.canvasState.connectionMode = true;
+                    window.canvasState.freeDrawMode = false;
+                    if (debugConsole) debugConsole.innerHTML += '<br>&gt; Switched to Pin-to-Pin mode';
+                    break;
+                case 'free':
+                    window.canvasState.connectionMode = false;
+                    window.canvasState.freeDrawMode = true;
+                    if (debugConsole) debugConsole.innerHTML += '<br>&gt; Switched to Free Draw mode';
+                    break;
+                case 'ortho':
+                    // TODO: Implement orthogonal routing
+                    if (debugConsole) debugConsole.innerHTML += '<br>&gt; Orthogonal mode (coming soon)';
+                    break;
+                case 'bezier':
+                    // TODO: Implement bezier curves
+                    if (debugConsole) debugConsole.innerHTML += '<br>&gt; Bezier mode (coming soon)';
+                    break;
+            }
+
+            // Update button states
+            const freeBtn = document.getElementById('free-draw-btn');
+            const connBtn = document.getElementById('main-connect-btn');
+
+            if (freeBtn) {
+                freeBtn.style.background = window.canvasState.freeDrawMode ? '#10B981' : '#EC4899';
+                freeBtn.textContent = window.canvasState.freeDrawMode ? '✓ Free Draw ON' : '✏️ Free Draw';
+            }
+
+            if (connBtn) {
+                connBtn.style.background = window.canvasState.connectionMode ? '#10B981' : '#8B5CF6';
+                connBtn.textContent = window.canvasState.connectionMode ? '✓ Connection Mode ON' : '🔌 Connect';
+            }
+        }
+
+        // Add logic layer
+        function addLogicLayer() {
+            // TODO: Implement multiple logic layers
+            const debugConsole = document.getElementById('debug-console');
+            if (debugConsole) {
+                debugConsole.innerHTML += '<br>&gt; Adding new logic layer...';
+            }
+        }
+
+        // Step through signal propagation
+        function stepSignal() {
+            // TODO: Implement step-by-step signal propagation
+            const debugConsole = document.getElementById('debug-console');
+            if (debugConsole) {
+                debugConsole.innerHTML += '<br>&gt; Stepping signal...';
+            }
+        }
+
+        // Reset all signals
+        function resetSignals() {
+            if (window.canvasState && window.canvasState.gates) {
+                window.canvasState.gates.forEach(gate => {
+                    gate.value = 0;
+                });
+
+                const canvas = document.getElementById('advancedCanvas');
+                if (canvas) {
+                    redrawCanvasForState(canvas, window.canvasState);
+                }
+
+                const debugConsole = document.getElementById('debug-console');
+                if (debugConsole) {
+                    debugConsole.innerHTML += '<br>&gt; All signals reset to 0';
+                }
+            }
+        }
+
+        // Apply logic template
+        function applyLogicTemplate() {
+            const template = document.getElementById('logic-template').value;
+            const debugConsole = document.getElementById('debug-console');
+
+            if (!template) {
+                if (debugConsole) debugConsole.innerHTML += '<br>&gt; Please select a template';
+                return;
+            }
+
+            // TODO: Implement actual templates
+            if (debugConsole) {
+                debugConsole.innerHTML += `<br>&gt; Applying template: ${template}`;
+            }
+        }
+
+        // Layer-specific advanced control functions
+        function toggleNodeAdvanced(nodeId) {
+            const advancedDiv = document.getElementById(`node-advanced-${nodeId}`);
+            if (advancedDiv) {
+                advancedDiv.style.display = advancedDiv.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+
+        // Open Global Logic Settings - redirects to Logic Builder tab
+        function openGlobalLogicSettings() {
+            console.log('[Tree Builder] Opening Logic Builder tab for global logic settings');
+
+            try {
+                sendToParent('OPEN_LOGIC_BUILDER', {
+                    message: 'User requested logic settings from tree builder',
+                    timestamp: Date.now()
+                });
+                showToast('Opening Logic Builder...', 'info');
+            } catch (error) {
+                console.error('[Tree Builder] Failed to open Logic Builder:', error);
+                showToast('Failed to open Logic Builder', 'error');
+
+                // Fallback: show message
+                alert('Please switch to the Logic Builder tab manually to configure global logic settings.');
+            }
+        }
+
+        // Apply global logic settings
+        function applyGlobalLogicSettings() {
+            if (!window.canvasState) {
+                window.canvasState = {
+                    gates: [],
+                    connections: [],
+                    freeFormEdges: [],
+                    settings: {}
+                };
+            }
+
+            // Gather settings
+            window.canvasState.settings = {
+                autoSnap: document.getElementById('auto-snap-connections').checked,
+                allowCycles: document.getElementById('allow-cycles').checked,
+                bidirectionalFlow: document.getElementById('bidirectional-flow').checked,
+                snapDistance: parseInt(document.getElementById('snap-distance').value),
+                propagationMode: document.getElementById('propagation-mode').value,
+                maxIterations: parseInt(document.getElementById('max-iterations').value),
+                signalDelay: parseInt(document.getElementById('signal-delay').value),
+                connectionStyle: document.getElementById('connection-style').value,
+                animateSignals: document.getElementById('animate-signals').checked,
+                showSignalStrength: document.getElementById('show-signal-strength').checked,
+                defaultEdgeColor: document.getElementById('default-edge-color').value,
+                freeDrawLogical: document.getElementById('free-draw-logical').checked,
+                detectionRadius: parseInt(document.getElementById('detection-radius').value),
+                showConnectionHints: document.getElementById('show-connection-hints').checked
+            };
+
+            // Apply to builder canvas as well
+            if (window.builderCanvasState) {
+                window.builderCanvasState.settings = { ...window.canvasState.settings };
+            }
+
+            console.log('Global logic settings applied:', window.canvasState.settings);
+            closeAdvancedLogicPopup();
+
+            // Redraw canvases with new settings
+            const mainCanvas = document.getElementById('advancedCanvas');
+            if (mainCanvas && window.canvasState) {
+                redrawCanvasForState(mainCanvas, window.canvasState);
+            }
+
+            const builderCanvas = document.getElementById('builderCanvas');
+            if (builderCanvas && window.builderCanvasState) {
+                redrawCanvasForState(builderCanvas, window.builderCanvasState);
+            }
+        }
+
+        // Open Advanced Logic Settings for a specific node
+        function openAdvancedLogicPopup(nodeId) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) {
+                console.error('[Tree Builder] Node not found:', nodeId);
+                showToast('Node not found', 'error');
+                return;
+            }
+
+            console.log('[Tree Builder] Opening node logic settings for:', nodeId, node);
+
+            // Prepare complete node data for React modal
+            const nodeData = {
+                id: node.id,
+                question: node.question,
+                name: node.name || node.question,
+                nodeType: node.nodeType || 'decision',
+                logicType: node.logicType || 'threshold',
+                threshold: node.threshold || 0.5,
+                thresholds: node.thresholds || [],
+                thresholdK: node.thresholdK || 2,
+                fuzzyMembership: node.fuzzyMembership || 'triangular',
+                fuzzyOperation: node.fuzzyOperation,
+                fuzzyParams: node.fuzzyParams || {},
+                probabilityType: node.probabilityType,
+                probabilityDistribution: node.probabilityDistribution || [],
+                statTest: node.statTest,
+                confidenceLevel: node.confidenceLevel || 0.95,
+                pThreshold: node.pThreshold || 0.05,
+                branchCount: node.branchCount || 2,
+                branchLabels: node.branchLabels || [],
+                scaleMin: node.scaleMin || -5,
+                scaleMax: node.scaleMax || 5,
+                continuousDomain: node.continuousDomain || false,
+                truthTable: node.truthTable || {},
+                customFunction: node.metadata?.customFunctionString || '',
+                visual: {
+                    color: node.visual?.color || '#4A90E2',
+                    icon: node.visual?.icon || '',
+                    shape: node.visual?.shape || 'rectangle'
+                },
+                score: node.score || 0,
+                layerIndex: node.layerIndex,
+                parentId: node.parentId,
+                childIds: node.childIds || []
+            };
+
+            // Send to React parent app
+            const isEmbedded = window.self !== window.top;
+            if (isEmbedded && window.parent) {
+                console.log('[Tree Builder] Sending OPEN_NODE_LOGIC_MODAL to React parent');
+                window.parent.postMessage(
+                    {
+                        type: 'OPEN_NODE_LOGIC_MODAL',
+                        payload: { node: nodeData },
+                        source: 'tree-builder'
+                    },
+                    window.location.origin
+                );
+            } else {
+                console.error('[Tree Builder] Not embedded in iframe, showing fallback');
+                openFallbackNodeSettings(nodeId, node);
+            }
+        }
+
+        // Fallback settings dialog if React modal fails
+        function openFallbackNodeSettings(nodeId, node) {
+            const settings = prompt(
+                `Node Settings for: ${node.question}\n\n` +
+                `Current Type: ${node.nodeType || 'decision'}\n` +
+                `Current Logic: ${node.logicType || 'threshold'}\n` +
+                `Branches: ${node.branchCount || 2}\n\n` +
+                `Enter new settings in format: nodeType,logicType,branchCount\n` +
+                `(e.g., logic_gate,and,2)`
+            );
+
+            if (settings) {
+                const [nodeType, logicType, branchCount] = settings.split(',').map(s => s.trim());
+                if (nodeType) node.nodeType = nodeType;
+                if (logicType) node.logicType = logicType;
+                if (branchCount && !isNaN(branchCount)) {
+                    updateNodeBranches(nodeId, parseInt(branchCount));
+                }
+                treeBuilder.updateLayersDisplay();
+                visualizeTree();
+                showToast('Node settings updated', 'success');
+            }
+        }
+
+        function closeAdvancedLogicPopup() {
+            const popup = document.getElementById('advanced-logic-popup');
+            const overlay = document.getElementById('popup-overlay');
+            if (popup) popup.style.display = 'none';
+            if (overlay) overlay.style.display = 'none';
+        }
+
+        function generateAdvancedLogicHTML(node) {
+            const currentScaleMin = node.scaleMin || -5;
+            const currentScaleMax = node.scaleMax || 5;
+
+            return `
+                <!-- Node Type Selection -->
+                <div style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(99, 102, 241, 0.05)); border-radius: 10px;">
+                    <label style="font-weight: 600; color: #6366F1; font-size: 16px;">Node Type:</label>
+                    <select id="adv-node-type" onchange="updateAdvancedNodeType(this.value)" style="width: 100%; padding: 10px; margin-top: 5px; border: 2px solid rgba(139, 92, 246, 0.3); border-radius: 6px; font-size: 14px;">
+                        <option value="decision" ${node.nodeType === 'decision' ? 'selected' : ''}>Decision Node</option>
+                        <option value="logic_gate" ${node.nodeType === 'logic_gate' ? 'selected' : ''}>Logic Gate</option>
+                        <option value="fuzzy_gate" ${node.nodeType === 'fuzzy_gate' ? 'selected' : ''}>Fuzzy Logic</option>
+                        <option value="probabilistic" ${node.nodeType === 'probabilistic' ? 'selected' : ''}>Probabilistic</option>
+                        <option value="statistical" ${node.nodeType === 'statistical' ? 'selected' : ''}>Statistical</option>
+                    </select>
+                </div>
+
+                <!-- Logic Gate Options -->
+                <div id="adv-gate-options" style="display: ${node.nodeType === 'logic_gate' ? 'block' : 'none'}; margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 10px;">
+                    <h3 style="color: #8B5CF6; margin-bottom: 15px;">Logic Gate Configuration</h3>
+
+                    <label style="font-weight: 600;">Gate Type:</label>
+                    <select id="adv-gate-type" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="and" ${node.logicType === 'and' ? 'selected' : ''}>AND - All inputs must be true</option>
+                        <option value="or" ${node.logicType === 'or' ? 'selected' : ''}>OR - At least one input must be true</option>
+                        <option value="not" ${node.logicType === 'not' ? 'selected' : ''}>NOT - Inverts single input</option>
+                        <option value="nand" ${node.logicType === 'nand' ? 'selected' : ''}>NAND - NOT(AND)</option>
+                        <option value="nor" ${node.logicType === 'nor' ? 'selected' : ''}>NOR - NOT(OR)</option>
+                        <option value="xor" ${node.logicType === 'xor' ? 'selected' : ''}>XOR - Exclusive OR</option>
+                        <option value="xnor" ${node.logicType === 'xnor' ? 'selected' : ''}>XNOR - Exclusive NOR</option>
+                        <option value="majority" ${node.logicType === 'majority' ? 'selected' : ''}>MAJORITY - More than half</option>
+                        <option value="threshold" ${node.logicType === 'threshold' ? 'selected' : ''}>THRESHOLD - K of N</option>
+                        <option value="custom" ${node.logicType === 'custom' ? 'selected' : ''}>CUSTOM - Truth table</option>
+                    </select>
+
+                    <div id="adv-threshold-config" style="display: ${node.logicType === 'threshold' ? 'block' : 'none'};">
+                        <label>Threshold K (minimum true inputs):</label>
+                        <input type="number" id="adv-threshold-k" value="${node.thresholdK || 2}" min="1" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                    </div>
+
+                    <label>
+                        <input type="checkbox" id="adv-continuous-domain" ${node.continuousDomain ? 'checked' : ''}>
+                        Enable Continuous Domain (0-1 values)
+                    </label>
+                </div>
+
+                <!-- Fuzzy Logic Options -->
+                <div id="adv-fuzzy-options" style="display: ${node.nodeType === 'fuzzy_gate' ? 'block' : 'none'}; margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 10px;">
+                    <h3 style="color: #9B59B6; margin-bottom: 15px;">Fuzzy Logic Configuration</h3>
+
+                    <label style="font-weight: 600;">Fuzzy Operation:</label>
+                    <select id="adv-fuzzy-op" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <optgroup label="T-norms (AND-like)">
+                            <option value="fuzzy_min" ${node.logicType === 'fuzzy_min' ? 'selected' : ''}>Minimum - min(a,b)</option>
+                            <option value="fuzzy_product" ${node.logicType === 'fuzzy_product' ? 'selected' : ''}>Product - a×b</option>
+                            <option value="fuzzy_lukasiewicz_and" ${node.logicType === 'fuzzy_lukasiewicz_and' ? 'selected' : ''}>Lukasiewicz - max(0,a+b-1)</option>
+                        </optgroup>
+                        <optgroup label="S-norms (OR-like)">
+                            <option value="fuzzy_max" ${node.logicType === 'fuzzy_max' ? 'selected' : ''}>Maximum - max(a,b)</option>
+                            <option value="fuzzy_sum" ${node.logicType === 'fuzzy_sum' ? 'selected' : ''}>Probabilistic Sum - a+b-ab</option>
+                            <option value="fuzzy_lukasiewicz_or" ${node.logicType === 'fuzzy_lukasiewicz_or' ? 'selected' : ''}>Lukasiewicz - min(1,a+b)</option>
+                        </optgroup>
+                        <optgroup label="Averaging">
+                            <option value="fuzzy_average" ${node.logicType === 'fuzzy_average' ? 'selected' : ''}>Arithmetic Mean</option>
+                            <option value="fuzzy_geometric" ${node.logicType === 'fuzzy_geometric' ? 'selected' : ''}>Geometric Mean</option>
+                            <option value="fuzzy_weighted_average" ${node.logicType === 'fuzzy_weighted_average' ? 'selected' : ''}>Weighted Average</option>
+                        </optgroup>
+                    </select>
+
+                    <label style="font-weight: 600;">Membership Function:</label>
+                    <select id="adv-membership" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="triangular" ${node.fuzzyMembership === 'triangular' ? 'selected' : ''}>Triangular</option>
+                        <option value="trapezoidal" ${node.fuzzyMembership === 'trapezoidal' ? 'selected' : ''}>Trapezoidal</option>
+                        <option value="gaussian" ${node.fuzzyMembership === 'gaussian' ? 'selected' : ''}>Gaussian</option>
+                        <option value="sigmoid" ${node.fuzzyMembership === 'sigmoid' ? 'selected' : ''}>Sigmoid</option>
+                    </select>
+                </div>
+
+                <!-- Probabilistic Options -->
+                <div id="adv-prob-options" style="display: ${node.nodeType === 'probabilistic' ? 'block' : 'none'}; margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 10px;">
+                    <h3 style="color: #E74C3C; margin-bottom: 15px;">Probabilistic Configuration</h3>
+
+                    <label style="font-weight: 600;">Distribution Type:</label>
+                    <select id="adv-prob-dist" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="gaussian" ${node.probabilityType === 'gaussian' ? 'selected' : ''}>Gaussian/Normal</option>
+                        <option value="uniform" ${node.probabilityType === 'uniform' ? 'selected' : ''}>Uniform</option>
+                        <option value="exponential" ${node.probabilityType === 'exponential' ? 'selected' : ''}>Exponential</option>
+                        <option value="beta" ${node.probabilityType === 'beta' ? 'selected' : ''}>Beta</option>
+                        <option value="binomial" ${node.probabilityType === 'binomial' ? 'selected' : ''}>Binomial</option>
+                        <option value="custom" ${node.probabilityType === 'custom' ? 'selected' : ''}>Custom</option>
+                    </select>
+
+                    <div id="adv-gaussian-params" style="display: ${node.probabilityType === 'gaussian' ? 'block' : 'none'};">
+                        <label>Mean (μ):</label>
+                        <input type="number" id="adv-prob-mean" value="${node.probMean || 0}" style="width: 100%; padding: 8px; margin: 5px 0 10px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <label>Std Dev (σ):</label>
+                        <input type="number" id="adv-prob-std" value="${node.probStd || 1}" min="0.001" step="0.1" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                    </div>
+                </div>
+
+                <!-- Statistical Options -->
+                <div id="adv-stat-options" style="display: ${node.nodeType === 'statistical' ? 'block' : 'none'}; margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 10px;">
+                    <h3 style="color: #F39C12; margin-bottom: 15px;">Statistical Analysis</h3>
+
+                    <label style="font-weight: 600;">Statistical Test:</label>
+                    <select id="adv-stat-test" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="none" ${!node.statTest ? 'selected' : ''}>None</option>
+                        <option value="t-test" ${node.statTest === 't-test' ? 'selected' : ''}>T-test</option>
+                        <option value="chi-square" ${node.statTest === 'chi-square' ? 'selected' : ''}>Chi-square</option>
+                        <option value="anova" ${node.statTest === 'anova' ? 'selected' : ''}>ANOVA</option>
+                        <option value="mann-whitney" ${node.statTest === 'mann-whitney' ? 'selected' : ''}>Mann-Whitney U</option>
+                        <option value="wilcoxon" ${node.statTest === 'wilcoxon' ? 'selected' : ''}>Wilcoxon</option>
+                    </select>
+
+                    <label style="font-weight: 600;">Confidence Level:</label>
+                    <select id="adv-confidence" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="0.90" ${node.confidenceLevel == 0.90 ? 'selected' : ''}>90%</option>
+                        <option value="0.95" ${node.confidenceLevel == 0.95 ? 'selected' : ''}>95%</option>
+                        <option value="0.99" ${node.confidenceLevel == 0.99 ? 'selected' : ''}>99%</option>
+                        <option value="0.999" ${node.confidenceLevel == 0.999 ? 'selected' : ''}>99.9%</option>
+                    </select>
+
+                    <label style="font-weight: 600;">P-value Threshold:</label>
+                    <input type="number" id="adv-p-threshold" value="${node.pThreshold || 0.05}" min="0.0001" max="1" step="0.001" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+                </div>
+
+                <!-- Branch Configuration -->
+                <div style="margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 10px;">
+                    <h3 style="color: #2ECC71; margin-bottom: 15px;">Branch Configuration</h3>
+
+                    <label style="font-weight: 600;">Number of Branches:</label>
+                    <input type="number" id="adv-branch-count" value="${node.branchCount || 2}" min="2" max="16" onchange="updateAdvancedBranchCount()" oninput="updateAdvancedBranchCount()" style="width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #d1d5db; border-radius: 6px;">
+
+                    <label style="font-weight: 600;">Branch Labels:</label>
+                    <div id="adv-branch-labels">
+                        ${generateBranchLabelInputs(node)}
+                    </div>
+                </div>
+
+                <!-- Custom Scale Range -->
+                <div style="margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.5); border-radius: 10px;">
+                    <h3 style="color: #3498DB; margin-bottom: 15px;">Custom Scale Range</h3>
+
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="number" id="adv-scale-min" value="${node.scaleMin || currentScaleMin}" placeholder="Min" style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <span>to</span>
+                        <input type="number" id="adv-scale-max" value="${node.scaleMax || currentScaleMax}" placeholder="Max" style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                    </div>
+                </div>
+            `;
+        }
+
+        function generateBranchLabelInputs(node) {
+            const count = node.branchCount || 2;
+            const labels = node.branchLabels || [];
+            let html = '';
+
+            for (let i = 0; i < count; i++) {
+                const defaultLabel = labels[i] || `Branch ${i + 1}`;
+                html += `
+                    <input type="text"
+                           id="adv-branch-label-${i}"
+                           value="${defaultLabel}"
+                           placeholder="Branch ${i + 1} label"
+                           style="width: 100%; padding: 6px; margin: 5px 0; border: 1px solid #d1d5db; border-radius: 4px;">
+                `;
+            }
+            return html;
+        }
+
+        function updateAdvancedNodeType(type) {
+            // Show/hide relevant sections based on type
+            document.getElementById('adv-gate-options').style.display = type === 'logic_gate' ? 'block' : 'none';
+            document.getElementById('adv-fuzzy-options').style.display = type === 'fuzzy_gate' ? 'block' : 'none';
+            document.getElementById('adv-prob-options').style.display = type === 'probabilistic' ? 'block' : 'none';
+            document.getElementById('adv-stat-options').style.display = type === 'statistical' ? 'block' : 'none';
+        }
+
+        function updateAdvancedBranchCount() {
+            const branchCountInput = document.getElementById('adv-branch-count');
+            if (!branchCountInput) return;
+
+            const count = parseInt(branchCountInput.value) || 2;
+            const nodeId = window.currentAdvancedNodeId;
+            const node = nodeId ? treeBuilder.nodes.get(nodeId) : null;
+
+            if (!node) return;
+
+            // Update branch labels container
+            const labelsContainer = document.getElementById('adv-branch-labels');
+            if (labelsContainer) {
+                let html = '';
+                const existingLabels = node.branchLabels || [];
+
+                for (let i = 0; i < count; i++) {
+                    const defaultLabel = existingLabels[i] || (count === 3 ? ['Low', 'Medium', 'High'][i] : `Branch ${i + 1}`);
+                    html += `
+                        <input type="text"
+                               id="adv-branch-label-${i}"
+                               value="${defaultLabel}"
+                               placeholder="Branch ${i + 1} label"
+                               style="width: 100%; padding: 6px; margin: 5px 0; border: 1px solid #d1d5db; border-radius: 4px;">
+                    `;
+                }
+                labelsContainer.innerHTML = html;
+            }
+        }
+
+        function applyAdvancedLogicSettings(nodeId) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            // Gather all settings from the popup
+            const settings = {
+                nodeType: document.getElementById('adv-node-type').value,
+                branchCount: parseInt(document.getElementById('adv-branch-count').value),
+                scaleMin: parseFloat(document.getElementById('adv-scale-min').value),
+                scaleMax: parseFloat(document.getElementById('adv-scale-max').value)
+            };
+
+            // Logic gate settings
+            if (settings.nodeType === 'logic_gate') {
+                settings.logicType = document.getElementById('adv-gate-type').value;
+                settings.continuousDomain = document.getElementById('adv-continuous-domain').checked;
+                if (settings.logicType === 'threshold') {
+                    settings.thresholdK = parseInt(document.getElementById('adv-threshold-k').value);
+                }
+            }
+
+            // Fuzzy logic settings
+            if (settings.nodeType === 'fuzzy_gate') {
+                settings.logicType = document.getElementById('adv-fuzzy-op').value;
+                settings.fuzzyMembership = document.getElementById('adv-membership').value;
+            }
+
+            // Probabilistic settings
+            if (settings.nodeType === 'probabilistic') {
+                settings.probabilityType = document.getElementById('adv-prob-dist').value;
+                if (settings.probabilityType === 'gaussian') {
+                    settings.probMean = parseFloat(document.getElementById('adv-prob-mean').value);
+                    settings.probStd = parseFloat(document.getElementById('adv-prob-std').value);
+                }
+            }
+
+            // Statistical settings
+            if (settings.nodeType === 'statistical') {
+                settings.statTest = document.getElementById('adv-stat-test').value;
+                settings.confidenceLevel = parseFloat(document.getElementById('adv-confidence').value);
+                settings.pThreshold = parseFloat(document.getElementById('adv-p-threshold').value);
+            }
+
+            // Branch labels
+            const branchLabels = [];
+            for (let i = 0; i < settings.branchCount; i++) {
+                const input = document.getElementById(`adv-branch-label-${i}`);
+                if (input) {
+                    branchLabels.push(input.value);
+                }
+            }
+            settings.branchLabels = branchLabels;
+
+            // Apply all settings to the node
+            Object.assign(node, settings);
+
+            // Update node's children arrays if branch count changed
+            if (settings.branchCount !== (node.childIds?.length || 0)) {
+                const oldChildIds = node.childIds || [];
+                const oldChildren = node.children || [];
+
+                // Create new arrays with correct size
+                node.childIds = new Array(settings.branchCount).fill(null);
+                node.children = new Array(settings.branchCount).fill(null);
+
+                // Copy over existing children
+                for (let i = 0; i < Math.min(oldChildIds.length, settings.branchCount); i++) {
+                    node.childIds[i] = oldChildIds[i];
+                    node.children[i] = oldChildren[i];
+                }
+            }
+
+            // Update thresholds for N-ary branches
+            if (settings.branchCount > 2) {
+                const scaleMin = settings.scaleMin || -5;
+                const scaleMax = settings.scaleMax || 5;
+                const rangeWidth = scaleMax - scaleMin;
+                const step = rangeWidth / settings.branchCount;
+
+                // Generate even thresholds if not set
+                if (!node.thresholds || node.thresholds.length !== settings.branchCount - 1) {
+                    node.thresholds = [];
+                    for (let i = 1; i < settings.branchCount; i++) {
+                        node.thresholds.push(scaleMin + (step * i));
+                    }
+                }
+            }
+
+            // Update AdvancedNode if it exists
+            if (window.AdvancedTreeLogic && window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    Object.assign(advancedNode, settings);
+                }
+            }
+
+            // Apply settings to canvas gates if they exist
+            if (window.canvasState && window.canvasState.gates) {
+                const canvasGate = window.canvasState.gates.find(g => g.id === nodeId);
+                if (canvasGate) {
+                    // Update gate type and properties
+                    canvasGate.type = settings.logicType || canvasGate.type;
+                    canvasGate.nodeType = settings.nodeType;
+                    canvasGate.branchCount = settings.branchCount;
+                    canvasGate.settings = settings;
+
+                    // Update input count based on branch count
+                    if (settings.branchCount && settings.branchCount !== canvasGate.inputs.length) {
+                        canvasGate.setInputCount(settings.branchCount);
+                    }
+
+                    // Redraw canvas with new settings
+                    const canvas = document.getElementById('advancedCanvas');
+                    if (canvas) {
+                        redrawCanvasForState(canvas, window.canvasState);
+                    }
+                }
+            }
+
+            // Apply to builder canvas as well
+            if (window.builderCanvasState && window.builderCanvasState.gates) {
+                const builderGate = window.builderCanvasState.gates.find(g => g.id === nodeId);
+                if (builderGate) {
+                    builderGate.type = settings.logicType || builderGate.type;
+                    builderGate.nodeType = settings.nodeType;
+                    builderGate.branchCount = settings.branchCount;
+                    builderGate.settings = settings;
+
+                    if (settings.branchCount && settings.branchCount !== builderGate.inputs.length) {
+                        builderGate.setInputCount(settings.branchCount);
+                    }
+
+                    const builderCanvas = document.getElementById('builderCanvas');
+                    if (builderCanvas) {
+                        redrawCanvasForState(builderCanvas, window.builderCanvasState);
+                    }
+                }
+            }
+
+            // Refresh the display
+            treeBuilder.updateLayersDisplay();
+            visualizeTree();
+
+            // Close the popup
+            closeAdvancedLogicPopup();
+
+            // Show success message
+            console.log('Advanced logic settings applied successfully:', settings);
+        }
+
+        // Missing functions for the advanced logic controls
+        function updateNodeTypeInLayer(nodeId, nodeType) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.nodeType = nodeType;
+
+            // Show/hide relevant configuration sections
+            document.getElementById(`gate-options-${nodeId}`).style.display = nodeType === 'logic_gate' ? 'block' : 'none';
+            document.getElementById(`fuzzy-options-${nodeId}`).style.display = nodeType === 'fuzzy_gate' ? 'block' : 'none';
+
+            // Update advanced node if it exists
+            if (window.AdvancedTreeLogic && window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.nodeType = nodeType;
+                }
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function updateGateTypeForNode(nodeId, gateType) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.logicType = gateType;
+            node.gateType = gateType;
+
+            // Update advanced node if it exists
+            if (window.AdvancedTreeLogic && window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.logicType = gateType;
+                }
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function updateFuzzyOperation(nodeId, operation) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.logicType = operation;
+            node.fuzzyOperation = operation;
+
+            // Update advanced node if it exists
+            if (window.AdvancedTreeLogic && window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.logicType = operation;
+                    advancedNode.fuzzyOperation = operation;
+                }
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function updateNodeScaleRange(nodeId) {
+            const minInput = document.getElementById(`node-scale-min-${nodeId}`);
+            const maxInput = document.getElementById(`node-scale-max-${nodeId}`);
+
+            if (minInput && maxInput) {
+                const min = parseFloat(minInput.value);
+                const max = parseFloat(maxInput.value);
+
+                if (!isNaN(min) && !isNaN(max) && min < max) {
+                    treeBuilder.updateNodeProperties(nodeId, {
+                        scaleMin: min,
+                        scaleMax: max
+                    });
+                }
+            }
+        }
+
+        function toggleContinuousDomain(nodeId, enabled) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.continuousDomain = enabled;
+
+            // Show/hide continuous domain options
+            const scaleDiv = document.getElementById(`gate-scale-${nodeId}`);
+            if (scaleDiv) {
+                scaleDiv.style.display = enabled ? 'block' : 'none';
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function updateCustomTruthTable(nodeId, truthTable) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.truthTable = truthTable;
+
+            // Parse and validate truth table
+            try {
+                const lines = truthTable.trim().split('\n');
+                const parsedTable = {};
+                for (const line of lines) {
+                    const [input, output] = line.split(':');
+                    if (input && output !== undefined) {
+                        parsedTable[input.trim()] = output.trim() === '1';
+                    }
+                }
+                node.parsedTruthTable = parsedTable;
+            } catch (error) {
+                console.error('Invalid truth table format:', error);
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function updateConfidenceLevel(nodeId, level) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            if (level === 'custom') {
+                document.getElementById(`custom-confidence-${nodeId}`).style.display = 'block';
+            } else {
+                document.getElementById(`custom-confidence-${nodeId}`).style.display = 'none';
+                node.confidenceLevel = parseFloat(level);
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function toggleFuzzyContinuous(nodeId, enabled) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.fuzzyContinuous = enabled;
+            treeBuilder.renderNodes();
+        }
+
+        function updateProbabilityDistribution(nodeId, distribution) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.probabilityType = distribution;
+
+            // Show/hide relevant parameter sections
+            const paramsDiv = document.getElementById(`dist-params-${nodeId}`);
+            if (paramsDiv) {
+                // Update parameter visibility based on distribution type
+                const gaussianDiv = paramsDiv.querySelector('div:nth-child(1)');
+                const betaDiv = paramsDiv.querySelector('div:nth-child(2)');
+                const uniformDiv = paramsDiv.querySelector('div:nth-child(3)');
+                const rateDiv = paramsDiv.querySelector('div:nth-child(4)');
+                const binomialDiv = paramsDiv.querySelector('div:nth-child(5)');
+
+                if (gaussianDiv) gaussianDiv.style.display = distribution === 'gaussian' ? 'block' : 'none';
+                if (betaDiv) betaDiv.style.display = distribution === 'beta' ? 'block' : 'none';
+                if (uniformDiv) uniformDiv.style.display = distribution === 'uniform' ? 'block' : 'none';
+                if (rateDiv) rateDiv.style.display = ['exponential', 'poisson'].includes(distribution) ? 'block' : 'none';
+                if (binomialDiv) binomialDiv.style.display = distribution === 'binomial' ? 'block' : 'none';
+            }
+
+            const customDiv = document.getElementById(`custom-dist-${nodeId}`);
+            if (customDiv) {
+                customDiv.style.display = distribution === 'custom' ? 'block' : 'none';
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function toggleContinuousProbability(nodeId, enabled) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.continuousProbability = enabled;
+
+            const optionsDiv = document.getElementById(`cont-prob-options-${nodeId}`);
+            if (optionsDiv) {
+                optionsDiv.style.display = enabled ? 'block' : 'none';
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function updateCustomProbabilities(nodeId, probabilities) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.customProbs = probabilities;
+
+            // Parse and normalize probabilities
+            try {
+                const probs = probabilities.trim().split('\n').map(p => parseFloat(p));
+                const sum = probs.reduce((a, b) => a + b, 0);
+                if (sum > 0) {
+                    node.normalizedProbs = probs.map(p => p / sum);
+                }
+            } catch (error) {
+                console.error('Invalid probability format:', error);
+            }
+
+            treeBuilder.renderNodes();
+        }
+
+        function updateNodeType(nodeId, nodeType) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            // Update the node type
+            node.nodeType = nodeType;
+
+            // Update advanced node if it exists
+            if (window.AdvancedTreeLogic.graph) {
+                let advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (!advancedNode) {
+                    // Create advanced node if it doesn't exist
+                    advancedNode = new AdvancedNode({
+                        id: nodeId,
+                        name: node.question,
+                        nodeType: nodeType,
+                        layer: node.depth || 0
+                    });
+                    window.AdvancedTreeLogic.graph.addNode(advancedNode);
+                } else {
+                    advancedNode.nodeType = nodeType;
+                }
+            }
+
+            // Show/hide relevant config sections
+            document.getElementById(`gate-config-${nodeId}`).style.display =
+                nodeType === 'logic_gate' ? 'block' : 'none';
+            document.getElementById(`fuzzy-config-${nodeId}`).style.display =
+                nodeType === 'fuzzy_gate' ? 'block' : 'none';
+            document.getElementById(`branches-config-${nodeId}`).style.display =
+                nodeType === 'multi_valued' ? 'block' : 'none';
+
+            // Update the tree visualization
+            visualizeTree();
+        }
+
+        function updateNodeGateType(nodeId, gateType) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.logicType = gateType;
+
+            if (window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.logicType = gateType;
+                }
+            }
+
+            visualizeTree();
+        }
+
+        function updateFuzzyMembership(nodeId, membershipType) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            node.fuzzyMembership = membershipType;
+
+            if (window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.fuzzyMembership = membershipType;
+                }
+            }
+
+            visualizeTree();
+        }
+
+        function updateNodeBranches(nodeId, branchCount) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            const count = parseInt(branchCount);
+            if (count < 2 || count > 16) return;
+
+            // Use the node's setBranchCount method if it exists
+            if (typeof node.setBranchCount === 'function') {
+                node.setBranchCount(count);
+            } else {
+                // Manual setup if setBranchCount doesn't exist
+                node.branchCount = count;
+                node.numBranches = count;
+
+                // Generate thresholds for n-ary
+                if (count > 2) {
+                    node.thresholds = [];
+                    const step = (currentScaleMax - currentScaleMin) / count;
+                    for (let i = 1; i < count; i++) {
+                        node.thresholds.push(currentScaleMin + step * i);
+                    }
+                } else {
+                    node.thresholds = [node.threshold || 0];
+                }
+
+                // Initialize children arrays
+                if (!node.childIds || node.childIds.length !== count) {
+                    const oldChildIds = node.childIds || [];
+                    node.childIds = new Array(count).fill(null);
+                    node.children = new Array(count).fill(null);
+
+                    // Preserve existing connections
+                    for (let i = 0; i < Math.min(oldChildIds.length, count); i++) {
+                        node.childIds[i] = oldChildIds[i];
+                        if (oldChildIds[i]) {
+                            node.children[i] = treeBuilder.nodes.get(oldChildIds[i]);
+                        }
+                    }
+                }
+
+                // Generate branch labels
+                if (!node.branchLabels || node.branchLabels.length !== count) {
+                    node.branchLabels = generateDefaultBranchLabels(count);
+                }
+            }
+
+            // Update display to show threshold inputs
+            const thresholdsContainer = document.getElementById(`thresholds-container-${nodeId}`);
+            if (thresholdsContainer) {
+                // Always update the threshold container when branch count changes
+                if (typeof treeBuilder.renderThresholdsForBranches === 'function') {
+                    thresholdsContainer.innerHTML = treeBuilder.renderThresholdsForBranches(node);
+                } else if (count > 2 && typeof treeBuilder.renderMultipleThresholds === 'function') {
+                    thresholdsContainer.innerHTML = treeBuilder.renderMultipleThresholds(node);
+                }
+            }
+
+            if (window.AdvancedTreeLogic && window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.branchCount = count;
+                    advancedNode.branches = new Array(count).fill(null);
+                    advancedNode.branchLabels = node.branchLabels;
+                    advancedNode.thresholds = node.thresholds;
+                }
+            }
+
+            // Update branch labels UI
+            updateBranchLabelsUI(nodeId, count);
+
+            // Show branches config for any multi-branch node
+            const branchesConfig = document.getElementById(`branches-config-${nodeId}`);
+            if (branchesConfig) {
+                branchesConfig.style.display = count > 2 ? 'block' : 'none';
+            }
+
+            // Update probability distribution if probabilistic
+            if (node.nodeType === 'probabilistic') {
+                updateProbabilityDistribution(nodeId, count);
+            }
+
+            // Show/hide n-ary connection panels based on branch count
+            const naryConnections = document.getElementById(`nary-connections-${nodeId}`);
+            const ternaryConnections = document.getElementById(`ternary-connections-${nodeId}`);
+
+            if (naryConnections && ternaryConnections) {
+                if (count === 3) {
+                    // Show n-ary panel and ternary-specific connections
+                    naryConnections.style.display = 'block';
+                    ternaryConnections.style.display = 'block';
+                } else if (count > 3) {
+                    // Show n-ary panel but hide ternary (placeholder for quaternary+)
+                    naryConnections.style.display = 'block';
+                    ternaryConnections.style.display = 'none';
+                    // TODO: Add quaternary, etc. panels here
+                } else {
+                    // Hide n-ary panels for binary trees
+                    naryConnections.style.display = 'none';
+                    ternaryConnections.style.display = 'none';
+                }
+            }
+
+            // Refresh the display
+            treeBuilder.updateLayersDisplay();
+            visualizeTree();
+        }
+
+        function generateDefaultBranchLabels(count) {
+            switch(count) {
+                case 2: return ['False', 'True'];
+                case 3: return ['Low', 'Medium', 'High'];
+                case 4: return ['Very Low', 'Low', 'High', 'Very High'];
+                case 5: return ['Very Low', 'Low', 'Medium', 'High', 'Very High'];
+                default:
+                    return Array.from({length: count}, (_, i) => `Branch ${i + 1}`);
+            }
+        }
+
+        // N-ary Tree Navigation Helper (preserves binary compatibility)
+        function getNextNode(currentNode, evaluationResult) {
+            if (!currentNode) return null;
+
+            // If node has n-ary children array and evaluation result is valid
+            if (currentNode.children && Array.isArray(currentNode.children) &&
+                currentNode.children.length > 2 &&
+                typeof evaluationResult === 'number' &&
+                evaluationResult >= 0 && evaluationResult < currentNode.children.length) {
+
+                // Use n-ary navigation
+                const nextNode = currentNode.children[evaluationResult];
+                return nextNode;
+            }
+
+            // Fallback to binary navigation for compatibility
+            if (typeof evaluationResult === 'number') {
+                // Convert numeric result to binary decision for legacy support
+                const binaryDecision = evaluationResult >= (currentNode.threshold || 0) ? 'right' : 'left';
+                if (binaryDecision === 'right' && currentNode.right) {
+                    return currentNode.right;
+                } else if (binaryDecision === 'left' && currentNode.left) {
+                    return currentNode.left;
+                }
+            }
+
+            // Handle string decisions (legacy)
+            if (typeof evaluationResult === 'string') {
+                if (evaluationResult === 'right' && currentNode.right) {
+                    return currentNode.right;
+                } else if (evaluationResult === 'left' && currentNode.left) {
+                    return currentNode.left;
+                }
+            }
+
+            return null;
+        }
+
+        function updateBranchLabelsUI(nodeId, count) {
+            const container = document.getElementById(`branch-labels-${nodeId}`);
+            if (!container) return;
+
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            let html = '<div style="margin-top: 8px;">';
+            for (let i = 0; i < count; i++) {
+                const label = node.branchLabels?.[i] || `Branch ${i + 1}`;
+                html += `
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                        <span style="color: #6B21A8; font-size: 11px; min-width: 20px;">B${i}:</span>
+                        <input type="text" value="${label}"
+                               onchange="updateBranchLabel('${nodeId}', ${i}, this.value)"
+                               style="flex: 1; padding: 4px 8px; border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 4px; font-size: 11px;">
+                    </div>
+                `;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function updateBranchLabel(nodeId, branchIndex, label) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            if (!node.branchLabels) {
+                node.branchLabels = generateDefaultBranchLabels(node.branchCount || 2);
+            }
+            node.branchLabels[branchIndex] = label;
+
+            if (window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.branchLabels = node.branchLabels;
+                }
+            }
+        }
+
+        function configureAdvancedConnections(nodeId) {
+            const matrix = document.getElementById(`connection-matrix-${nodeId}`);
+            if (!matrix) return;
+
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            // Toggle visibility
+            if (matrix.style.display === 'block') {
+                matrix.style.display = 'none';
+                return;
+            }
+
+            // Generate connection matrix
+            const branchCount = node.branchCount || 2;
+            const currentLayer = treeBuilder.getNodeLayer(nodeId);
+            const nextLayer = currentLayer + 1;
+
+            // Get available target nodes
+            let targetNodes = [];
+            if (nextLayer < treeBuilder.layers.length) {
+                targetNodes = treeBuilder.layers[nextLayer].nodes;
+            }
+
+            let html = '<div style="background: rgba(255,255,255,0.5); padding: 10px; border-radius: 6px;">';
+            html += '<h5 style="color: #6B21A8; margin-bottom: 8px;">Connect Branches to Nodes:</h5>';
+
+            for (let i = 0; i < branchCount; i++) {
+                const label = node.branchLabels?.[i] || `Branch ${i + 1}`;
+                html += `
+                    <div style="margin-bottom: 8px;">
+                        <label style="color: #4C1D95; font-size: 12px; display: block; margin-bottom: 4px;">
+                            ${label} →
+                        </label>
+                        <select onchange="connectBranchToNode('${nodeId}', ${i}, this.value)"
+                                style="width: 100%; padding: 6px; border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 4px; font-size: 11px;">
+                            <option value="">-- Not Connected --</option>
+                `;
+
+                // Add target node options
+                targetNodes.forEach(targetNode => {
+                    const selected = node.childIds?.[i] === targetNode.id ? 'selected' : '';
+                    const questionPreview = targetNode.question.substring(0, 40);
+                    html += `<option value="${targetNode.id}" ${selected}>${questionPreview}...</option>`;
+                });
+
+                // Add option to create new node
+                html += `<option value="__new__">+ Create New Node</option>`;
+
+                html += '</select></div>';
+            }
+
+            html += `
+                <button onclick="autoConnectBranches('${nodeId}')"
+                        style="width: 100%; margin-top: 8px; padding: 6px; background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 6px; font-size: 11px; cursor: pointer;">
+                    Auto-Connect Sequential
+                </button>
+            `;
+
+            html += '</div>';
+            matrix.innerHTML = html;
+            matrix.style.display = 'block';
+        }
+
+        function connectBranchToNode(sourceNodeId, branchIndex, targetNodeId) {
+            const sourceNode = treeBuilder.nodes.get(sourceNodeId);
+            if (!sourceNode) return;
+
+            if (targetNodeId === '__new__') {
+                // Create new node and connect
+                const currentLayer = treeBuilder.getNodeLayer(sourceNodeId);
+                const newNode = treeBuilder.addNodeToLayer(currentLayer + 1);
+                targetNodeId = newNode.id;
+            }
+
+            // Update connection
+            if (!sourceNode.childIds) {
+                sourceNode.childIds = new Array(sourceNode.branchCount || 2).fill(null);
+                sourceNode.children = new Array(sourceNode.branchCount || 2).fill(null);
+            }
+
+            sourceNode.childIds[branchIndex] = targetNodeId || null;
+            sourceNode.children[branchIndex] = targetNodeId ? treeBuilder.nodes.get(targetNodeId) : null;
+
+            // Update advanced logic graph
+            if (window.AdvancedTreeLogic.graph && targetNodeId) {
+                window.AdvancedTreeLogic.graph.addEdge(sourceNodeId, targetNodeId, {
+                    sourcePort: branchIndex,
+                    label: sourceNode.branchLabels?.[branchIndex] || `Branch ${branchIndex + 1}`
+                });
+            }
+
+            // Refresh displays
+            treeBuilder.updateLayersDisplay();
+            visualizeTree();
+        }
+
+        function autoConnectBranches(nodeId) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            const currentLayer = treeBuilder.getNodeLayer(nodeId);
+            const nextLayer = currentLayer + 1;
+
+            if (nextLayer >= treeBuilder.layers.length) {
+                // Create new layer if needed
+                treeBuilder.addLayer();
+            }
+
+            const branchCount = node.branchCount || 2;
+            const targetNodes = treeBuilder.layers[nextLayer].nodes;
+
+            // Create nodes if not enough exist
+            while (targetNodes.length < branchCount) {
+                treeBuilder.addNodeToLayer(nextLayer);
+            }
+
+            // Connect branches sequentially
+            for (let i = 0; i < branchCount && i < targetNodes.length; i++) {
+                connectBranchToNode(nodeId, i, targetNodes[i].id);
+            }
+        }
+
+        function editTruthTable(nodeId) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node || node.nodeType !== 'logic_gate') return;
+
+            const container = document.getElementById(`truth-table-${nodeId}`);
+            if (!container) return;
+
+            // Generate truth table editor
+            const inputCount = 2; // For simplicity, using 2 inputs
+            const rows = Math.pow(2, inputCount);
+
+            let html = '<table style="width: 100%; border-collapse: collapse; margin-top: 8px;">';
+            html += '<tr style="background: rgba(139, 92, 246, 0.1);">';
+            for (let i = 0; i < inputCount; i++) {
+                html += `<th style="padding: 4px; border: 1px solid rgba(139, 92, 246, 0.3); font-size: 11px;">In${i}</th>`;
+            }
+            html += '<th style="padding: 4px; border: 1px solid rgba(139, 92, 246, 0.3); font-size: 11px;">Out</th>';
+            html += '</tr>';
+
+            for (let row = 0; row < rows; row++) {
+                html += '<tr>';
+                for (let col = 0; col < inputCount; col++) {
+                    const bit = (row >> col) & 1;
+                    html += `<td style="padding: 4px; border: 1px solid rgba(139, 92, 246, 0.3); text-align: center; font-size: 11px;">${bit}</td>`;
+                }
+
+                // Output column (editable)
+                const outputValue = evaluateGateOutput(node.logicType, row, inputCount);
+                html += `
+                    <td style="padding: 4px; border: 1px solid rgba(139, 92, 246, 0.3); text-align: center;">
+                        <input type="checkbox" ${outputValue ? 'checked' : ''}
+                               onchange="updateTruthTableOutput('${nodeId}', ${row}, this.checked)"
+                               style="cursor: pointer;">
+                    </td>
+                `;
+                html += '</tr>';
+            }
+
+            html += '</table>';
+            container.innerHTML = html;
+            container.style.display = container.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function evaluateGateOutput(gateType, inputPattern, inputCount) {
+            const inputs = [];
+            for (let i = 0; i < inputCount; i++) {
+                inputs.push((inputPattern >> i) & 1);
+            }
+
+            switch(gateType) {
+                case 'and': return inputs.every(i => i === 1);
+                case 'or': return inputs.some(i => i === 1);
+                case 'xor': return inputs.reduce((a, b) => a ^ b) === 1;
+                case 'nand': return !inputs.every(i => i === 1);
+                case 'nor': return !inputs.some(i => i === 1);
+                case 'not': return inputs[0] === 0;
+                default: return 0;
+            }
+        }
+
+        function updateTruthTableOutput(nodeId, row, value) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            if (!node.truthTable) {
+                node.truthTable = {};
+            }
+            node.truthTable[row] = value ? 1 : 0;
+
+            if (window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.truthTable = node.truthTable;
+                }
+            }
+        }
+
+        function applyFuzzyParams(nodeId) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            const center = document.getElementById(`fuzzy-center-${nodeId}`)?.value;
+            const width = document.getElementById(`fuzzy-width-${nodeId}`)?.value;
+            const alpha = document.getElementById(`fuzzy-alpha-${nodeId}`)?.value;
+
+            if (!node.fuzzyParams) {
+                node.fuzzyParams = {};
+            }
+
+            if (center) node.fuzzyParams.center = parseFloat(center);
+            if (width) node.fuzzyParams.width = parseFloat(width);
+            if (alpha) node.fuzzyParams.alpha = parseFloat(alpha);
+
+            if (window.AdvancedTreeLogic.graph) {
+                const advancedNode = window.AdvancedTreeLogic.graph.nodes.get(nodeId);
+                if (advancedNode) {
+                    advancedNode.metadata = advancedNode.metadata || {};
+                    advancedNode.metadata.fuzzyParams = node.fuzzyParams;
+                }
+            }
+        }
+
+        function updateProbabilityDistribution(nodeId, branchCount) {
+            const container = document.getElementById(`prob-dist-${nodeId}`);
+            if (!container) return;
+
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            // Initialize probability distribution
+            if (!node.probabilityDistribution) {
+                node.probabilityDistribution = new Array(branchCount).fill(1 / branchCount);
+            }
+
+            let html = '';
+            for (let i = 0; i < branchCount; i++) {
+                const label = node.branchLabels?.[i] || `Branch ${i + 1}`;
+                const prob = (node.probabilityDistribution[i] * 100).toFixed(1);
+                html += `
+                    <div style="margin-bottom: 8px;">
+                        <label style="font-size: 11px; color: #6B21A8;">${label}: ${prob}%</label>
+                        <input type="range" min="0" max="100" step="1" value="${prob}"
+                               onchange="updateProbability('${nodeId}', ${i}, this.value)"
+                               style="width: 100%;">
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
+        function updateProbability(nodeId, index, value) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node) return;
+
+            if (!node.probabilityDistribution) {
+                node.probabilityDistribution = new Array(node.branchCount || 2).fill(1 / (node.branchCount || 2));
+            }
+
+            node.probabilityDistribution[index] = parseFloat(value) / 100;
+
+            // Update display
+            const container = document.getElementById(`prob-dist-${nodeId}`);
+            if (container) {
+                updateProbabilityDistribution(nodeId, node.branchCount || 2);
+            }
+        }
+
+        function normalizeProbabilities(nodeId) {
+            const node = treeBuilder.nodes.get(nodeId);
+            if (!node || !node.probabilityDistribution) return;
+
+            const sum = node.probabilityDistribution.reduce((a, b) => a + b, 0);
+            if (sum > 0) {
+                node.probabilityDistribution = node.probabilityDistribution.map(p => p / sum);
+            }
+
+            updateProbabilityDistribution(nodeId, node.branchCount || 2);
+        }
+
+        // Helper to get node's layer
+        if (!window.treeBuilder.getNodeLayer) {
+            window.treeBuilder.getNodeLayer = function(nodeId) {
+                for (let i = 0; i < this.layers.length; i++) {
+                    if (this.layers[i].nodes.some(n => n.id === nodeId)) {
+                        return i;
+                    }
+                }
+                return -1;
+            };
+        }
+
+        // ============================================================================
+        // Gate Insertion and Chaining Functions
+        // ============================================================================
+
+        function insertGateBefore(nodeId) {
+            const targetNode = treeBuilder.nodes.get(nodeId);
+            if (!targetNode) return;
+
+            // Show gate selection dialog with callback
+            showGateSelector((gateType, params) => {
+                if (!gateType) return;
+
+                // Create new gate node with parameters
+                const gateNode = createGateNode(gateType, targetNode, params);
+
+                // Find parent connections to targetNode
+                const parents = findNodeParents(nodeId);
+
+                // Insert gate between parents and target
+                parents.forEach(parent => {
+                    // Find which branch index connects to target
+                    let branchIndex = 0;
+                    if (parent.childIds) {
+                        branchIndex = parent.childIds.indexOf(nodeId);
+                        if (branchIndex === -1) branchIndex = 0;
+                    }
+
+                    disconnectNodes(parent.id, nodeId, branchIndex);
+                    connectNodes(parent.id, gateNode.id, branchIndex);
+                });
+
+                // Connect gate to target
+                connectNodes(gateNode.id, nodeId);
+
+                // Update advanced node if exists
+                if (window.AdvancedTreeLogic && window.AdvancedTreeLogic.graph) {
+                    const advancedGate = window.AdvancedTreeLogic.graph.nodes.get(gateNode.id);
+                    if (advancedGate) {
+                        advancedGate.parameters = params;
+                    }
+                }
+
+                // Refresh displays
+                treeBuilder.updateLayersDisplay();
+                visualizeTree();
+            });
+        }
+
+        function insertGateAfter(nodeId) {
+            const sourceNode = treeBuilder.nodes.get(nodeId);
+            if (!sourceNode) return;
+
+            // Show gate selection dialog with callback
+            showGateSelector((gateType, params) => {
+                if (!gateType) return;
+
+                // Create new gate node with parameters
+                const gateNode = createGateNode(gateType, sourceNode, params);
+
+                // Store existing children connections
+                const childConnections = [];
+                if (sourceNode.childIds) {
+                    sourceNode.childIds.forEach((childId, branchIndex) => {
+                        if (childId) {
+                            childConnections.push({ childId, branchIndex });
+                        }
+                    });
+                }
+
+                // Determine which branch to connect gate to
+                let sourceBranchIndex = 0;
+                if (sourceNode.branchCount > 1) {
+                    // For multi-branch nodes, could prompt user or use first available
+                    sourceBranchIndex = sourceNode.childIds ? sourceNode.childIds.findIndex(id => !id) : 0;
+                    if (sourceBranchIndex === -1) sourceBranchIndex = 0;
+                }
+
+                // Disconnect all children from source
+                childConnections.forEach(({ childId, branchIndex }) => {
+                    disconnectNodes(nodeId, childId, branchIndex);
+                });
+
+                // Connect source to gate
+                connectNodes(nodeId, gateNode.id, sourceBranchIndex);
+
+                // Reconnect children to gate outputs
+                childConnections.forEach(({ childId }, index) => {
+                    const gateBranchIndex = Math.min(index, (gateNode.branchCount || 2) - 1);
+                    connectNodes(gateNode.id, childId, gateBranchIndex);
+                });
+
+                // Update advanced node if exists
+                if (window.AdvancedTreeLogic && window.AdvancedTreeLogic.graph) {
+                    const advancedGate = window.AdvancedTreeLogic.graph.nodes.get(gateNode.id);
+                    if (advancedGate) {
+                        advancedGate.parameters = params;
+                    }
+                }
+
+                // Refresh displays
+                treeBuilder.updateLayersDisplay();
+                visualizeTree();
+            });
+        }
+
+        function showGateSelector(callback) {
+            // Create modal backdrop
+            const backdrop = document.createElement('div');
+            backdrop.id = 'gate-selector-backdrop';
+            backdrop.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999;';
+
+            // Create gate selection modal
+            const modal = document.createElement('div');
+            modal.id = 'gate-selector-modal';
+            modal.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 10000; min-width: 400px;';
+
+            // Gate types with configurations
+            const gateTypes = [
+                { type: 'and', label: 'AND', color: '#8B5CF6', outputs: 2 },
+                { type: 'or', label: 'OR', color: '#6366F1', outputs: 2 },
+                { type: 'xor', label: 'XOR', color: '#EC4899', outputs: 2 },
+                { type: 'nand', label: 'NAND', color: '#F59E0B', outputs: 2 },
+                { type: 'nor', label: 'NOR', color: '#10B981', outputs: 2 },
+                { type: 'not', label: 'NOT', color: '#EF4444', outputs: 2 },
+                { type: 'majority', label: 'MAJORITY', color: '#3B82F6', outputs: 2 },
+                { type: 'threshold', label: 'THRESHOLD', color: '#14B8A6', outputs: 'variable' },
+                { type: 'fuzzy_and', label: 'FUZZY AND', color: '#A855F7', outputs: 'continuous' },
+                { type: 'fuzzy_or', label: 'FUZZY OR', color: '#0EA5E9', outputs: 'continuous' },
+                { type: 'router', label: 'ROUTER', color: '#F97316', outputs: 'variable' },
+                { type: 'merge', label: 'MERGE', color: '#84CC16', outputs: 1 }
+            ];
+
+            let buttonsHTML = gateTypes.map(g =>
+                `<button class="gate-select-btn" data-gate-type="${g.type}" data-outputs="${g.outputs}" style="background: ${g.color};">${g.label}</button>`
+            ).join('');
+
+            modal.innerHTML = `
+                <h3 style="margin-bottom: 15px; color: #6366F1; font-family: system-ui;">Select Logic Gate</h3>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 15px;">
+                    ${buttonsHTML}
+                </div>
+                <div id="gate-config" style="margin-bottom: 15px; display: none;">
+                    <label style="display: block; margin-bottom: 5px; color: #374151;">Gate Configuration:</label>
+                    <input type="text" id="gate-params" placeholder="Parameters (e.g., threshold values)" style="width: 100%; padding: 8px; border: 1px solid #D1D5DB; border-radius: 4px;">
+                </div>
+                <button id="cancel-gate-selector" style="padding: 8px 16px; background: #EF4444; color: white; border: none; border-radius: 6px; cursor: pointer;">Cancel</button>
+            `;
+
+            // Add backdrop and modal to DOM
+            document.body.appendChild(backdrop);
+            document.body.appendChild(modal);
+
+            // Add event handlers
+            const buttons = modal.querySelectorAll('.gate-select-btn');
+            buttons.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const gateType = this.dataset.gateType;
+                    const outputs = this.dataset.outputs;
+
+                    // Show config for variable output gates
+                    if (outputs === 'variable' || gateType === 'threshold' || gateType === 'router') {
+                        const configDiv = document.getElementById('gate-config');
+                        configDiv.style.display = 'block';
+                        document.getElementById('gate-params').placeholder =
+                            gateType === 'threshold' ? 'Enter threshold values (e.g., -5,2,5)' :
+                            gateType === 'router' ? 'Enter number of outputs (e.g., 4)' :
+                            'Enter parameters';
+
+                        // Wait for parameter input
+                        document.getElementById('gate-params').focus();
+                        document.getElementById('gate-params').addEventListener('keypress', function(e) {
+                            if (e.key === 'Enter') {
+                                const params = this.value;
+                                closeGateSelectorModal();
+                                if (callback) callback(gateType, params);
+                            }
+                        });
+                    } else {
+                        closeGateSelectorModal();
+                        if (callback) callback(gateType, null);
+                    }
+                });
+            });
+
+            // Cancel button
+            document.getElementById('cancel-gate-selector').addEventListener('click', function() {
+                closeGateSelectorModal();
+                if (callback) callback(null, null);
+            });
+
+            // Close on backdrop click
+            backdrop.addEventListener('click', function() {
+                closeGateSelectorModal();
+                if (callback) callback(null, null);
+            });
+
+            // Add styles
+            if (!document.getElementById('gate-selector-styles')) {
+                const style = document.createElement('style');
+                style.id = 'gate-selector-styles';
+                style.textContent = `
+                    .gate-select-btn {
+                        padding: 10px;
+                        color: white;
+                        border: none;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 12px;
+                        font-weight: 600;
+                        transition: transform 0.2s, box-shadow 0.2s;
+                    }
+                    .gate-select-btn:hover {
+                        transform: scale(1.05);
+                        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                    }
+                    .gate-select-btn:active {
+                        transform: scale(0.98);
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        }
+
+        function closeGateSelectorModal() {
+            const backdrop = document.getElementById('gate-selector-backdrop');
+            const modal = document.getElementById('gate-selector-modal');
+            if (backdrop) backdrop.remove();
+            if (modal) modal.remove();
+        }
+
+        function createGateNode(gateType, referenceNode, params) {
+            const layer = treeBuilder.getNodeLayer(referenceNode.id);
+            const newNode = treeBuilder.addNodeToLayer(layer);
+
+            // Configure as gate
+            newNode.nodeType = 'logic_gate';
+            newNode.logicType = gateType;
+            newNode.parameters = params;
+
+            // Parse parameters for special gates
+            let branchCount = 2;
+            let branchLabels = ['False', 'True'];
+            let gateLabel = gateType.toUpperCase();
+
+            if (gateType === 'threshold' && params) {
+                // Parse threshold values
+                const thresholds = params.split(',').map(v => parseFloat(v.trim()));
+                branchCount = thresholds.length + 1;
+                branchLabels = ['< ' + thresholds[0]];
+                for (let i = 0; i < thresholds.length - 1; i++) {
+                    branchLabels.push(`${thresholds[i]} - ${thresholds[i+1]}`);
+                }
+                branchLabels.push('> ' + thresholds[thresholds.length - 1]);
+                gateLabel = `THRESHOLD [${params}]`;
+                newNode.thresholds = thresholds;
+            } else if (gateType === 'router' && params) {
+                // Router with N outputs
+                branchCount = parseInt(params) || 2;
+                branchLabels = [];
+                for (let i = 0; i < branchCount; i++) {
+                    branchLabels.push(`Output ${i + 1}`);
+                }
+                gateLabel = `ROUTER (${branchCount}-way)`;
+                newNode.routerOutputs = branchCount;
+            } else if (gateType === 'merge') {
+                // Merge node has single output
+                branchCount = 1;
+                branchLabels = ['Merged Output'];
+                newNode.acceptsMultipleInputs = true;
+            } else if (gateType === 'majority') {
+                branchCount = 2;
+                branchLabels = ['Minority', 'Majority'];
+            } else if (['fuzzy_and', 'fuzzy_or'].includes(gateType)) {
+                // Fuzzy gates can have continuous output
+                branchCount = 3;
+                branchLabels = ['Low', 'Medium', 'High'];
+                newNode.fuzzyOutput = true;
+            }
+
+            newNode.question = gateLabel + ' Gate';
+            newNode.branchCount = branchCount;
+            newNode.branchLabels = branchLabels;
+
+            // Initialize child arrays
+            newNode.childIds = new Array(branchCount).fill(null);
+            newNode.children = new Array(branchCount).fill(null);
+
+            // Create advanced node
+            if (window.AdvancedTreeLogic && window.AdvancedTreeLogic.graph) {
+                const advancedNode = new AdvancedNode({
+                    id: newNode.id,
+                    name: newNode.question,
+                    nodeType: 'logic_gate',
+                    logicType: gateType,
+                    layer: layer,
+                    branchCount: branchCount,
+                    parameters: params
+                });
+
+                // Add gate-specific evaluation logic
+                advancedNode.evaluateGate = function(inputs) {
+                    switch(gateType) {
+                        case 'and':
+                            return inputs.every(i => i) ? 1 : 0;
+                        case 'or':
+                            return inputs.some(i => i) ? 1 : 0;
+                        case 'xor':
+                            return inputs.filter(i => i).length % 2 ? 1 : 0;
+                        case 'nand':
+                            return inputs.every(i => i) ? 0 : 1;
+                        case 'nor':
+                            return inputs.some(i => i) ? 0 : 1;
+                        case 'not':
+                            return inputs[0] ? 0 : 1;
+                        case 'majority':
+                            return inputs.filter(i => i).length > inputs.length / 2 ? 1 : 0;
+                        case 'threshold':
+                            const value = inputs.reduce((a, b) => a + b, 0);
+                            for (let i = 0; i < this.thresholds.length; i++) {
+                                if (value < this.thresholds[i]) return i;
+                            }
+                            return this.thresholds.length;
+                        case 'router':
+                            // Route based on input value modulo output count
+                            return Math.abs(inputs[0]) % this.routerOutputs;
+                        case 'merge':
+                            // Combine multiple inputs into single output
+                            return inputs.reduce((a, b) => a || b, 0) ? 0 : 0;
+                        case 'fuzzy_and':
+                            const minVal = Math.min(...inputs.map(i => i || 0));
+                            return minVal < 0.33 ? 0 : minVal < 0.67 ? 1 : 2;
+                        case 'fuzzy_or':
+                            const maxVal = Math.max(...inputs.map(i => i || 0));
+                            return maxVal < 0.33 ? 0 : maxVal < 0.67 ? 1 : 2;
+                        default:
+                            return 0;
+                    }
+                };
+
+                window.AdvancedTreeLogic.graph.addNode(advancedNode);
+            }
+
+            return newNode;
+        }
+
+        function findNodeParents(nodeId) {
+            const parents = [];
+            treeBuilder.nodes.forEach((node, id) => {
+                if (node.childIds && node.childIds.includes(nodeId)) {
+                    parents.push(node);
+                }
+            });
+            return parents;
+        }
+
+        function disconnectNodes(sourceId, targetId, branchIndex = null) {
+            const sourceNode = treeBuilder.nodes.get(sourceId);
+            if (!sourceNode) return;
+
+            if (branchIndex !== null && sourceNode.childIds) {
+                sourceNode.childIds[branchIndex] = null;
+                sourceNode.children[branchIndex] = null;
+            } else if (sourceNode.childIds) {
+                const index = sourceNode.childIds.indexOf(targetId);
+                if (index !== -1) {
+                    sourceNode.childIds[index] = null;
+                    sourceNode.children[index] = null;
+                }
+            }
+        }
+
+        function connectNodes(sourceId, targetId, branchIndex = 0) {
+            const sourceNode = treeBuilder.nodes.get(sourceId);
+            const targetNode = treeBuilder.nodes.get(targetId);
+            if (!sourceNode || !targetNode) return;
+
+            if (!sourceNode.childIds) {
+                sourceNode.childIds = new Array(sourceNode.branchCount || 2).fill(null);
+                sourceNode.children = new Array(sourceNode.branchCount || 2).fill(null);
+            }
+
+            sourceNode.childIds[branchIndex] = targetId;
+            sourceNode.children[branchIndex] = targetNode;
+        }
