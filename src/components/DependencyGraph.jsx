@@ -7,7 +7,8 @@ import ReactFlow, {
   useEdgesState,
   MarkerType,
   Panel,
-  useReactFlow
+  useReactFlow,
+  ReactFlowProvider
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { FiDownload, FiZoomIn, FiZoomOut, FiMaximize2, FiFilter, FiSearch, FiLayers, FiGitBranch, FiBarChart2 } from 'react-icons/fi';
@@ -1742,4 +1743,13 @@ const DependencyGraph = ({
   );
 };
 
-export default DependencyGraph;
+// Wrapper component with ReactFlowProvider
+const DependencyGraphWithProvider = (props) => {
+  return (
+    <ReactFlowProvider>
+      <DependencyGraph {...props} />
+    </ReactFlowProvider>
+  );
+};
+
+export default DependencyGraphWithProvider;

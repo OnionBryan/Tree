@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { FiZoomIn, FiZoomOut, FiMaximize, FiRefreshCw, FiDownload, FiSearch, FiFilter, FiLayers, FiClock, FiGitCompare } from 'react-icons/fi';
+import { FiZoomIn, FiZoomOut, FiMaximize, FiRefreshCw, FiDownload, FiSearch, FiFilter, FiLayers, FiClock, FiGitBranch } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 
 /**
