@@ -6939,24 +6939,26 @@ You can now:
     <!-- Tree Visualization Engine Module -->
     <script src="tree-visualization.js"></script>
     <script>
-        // Initialize tree builder when DOM is ready
+        // Initialize tree visualization engine (separate from main tree builder)
+        // Note: Uses different variable name to avoid conflict with existing treeBuilder
         document.addEventListener('DOMContentLoaded', function() {
-            // Create container for tree builder if needed
-            const treeContainer = document.createElement('div');
-            treeContainer.id = 'enhancedBuilderContainer';
-            treeContainer.style.display = 'none'; // Hidden by default
-            document.body.appendChild(treeContainer);
+            // Create container for visualization engine if needed
+            const vizContainer = document.createElement('div');
+            vizContainer.id = 'treeVisualizationContainer';
+            vizContainer.style.display = 'none'; // Hidden by default
+            document.body.appendChild(vizContainer);
 
-            // Initialize the tree builder
-            window.treeBuilder = new TreeVisualization.EnhancedTreeBuilder('enhancedBuilderContainer');
+            // Initialize the visualization engine with different variable name
+            // Access via: window.treeVisualizer (NOT treeBuilder)
+            window.treeVisualizer = new TreeVisualization.EnhancedTreeBuilder('treeVisualizationContainer');
 
             console.log('✨ Tree Visualization Engine loaded and ready');
-            console.log('Available classes:', Object.keys(TreeVisualization));
+            console.log('Access via: window.treeVisualizer or window.TreeVisualization');
         });
 
-        // Optional: Add a button to toggle tree builder visibility
-        function toggleTreeBuilder() {
-            const container = document.getElementById('enhancedBuilderContainer');
+        // Function to toggle visualization engine visibility
+        function toggleTreeVisualization() {
+            const container = document.getElementById('treeVisualizationContainer');
             if (container) {
                 container.style.display = container.style.display === 'none' ? 'block' : 'none';
             }

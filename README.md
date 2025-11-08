@@ -4,6 +4,10 @@ Multi-Branch Tree Rendering with Interactive Features - Version 2.0
 
 ## Overview
 
+This is an **additional visualization module** that complements the existing GSU Decision Tree Builder. It provides advanced canvas-based rendering and layout algorithms.
+
+⚠️ **Note**: This module is separate from and does not replace the existing tree builder in `index.html`. Both tools can be used together.
+
 This module provides comprehensive visualization capabilities for advanced tree logic systems, including:
 
 - **Layout Algorithms**: Hierarchical, Radial, and Force-Directed layouts
@@ -224,16 +228,18 @@ Open `tree-demo.html` in a browser to see an interactive demo with:
 
 ## Integration with Existing Application
 
+⚠️ **Important**: This visualization engine uses **separate variable names** to avoid conflicts with the existing tree builder.
+
 The module is integrated into `index.html` and can be accessed via:
 
 ```javascript
-// Access the tree builder
-window.treeBuilder
+// Access the visualization engine (NOT treeBuilder - that's the existing tool)
+window.treeVisualizer
 
-// Toggle visibility
-toggleTreeBuilder()
+// Toggle visualization visibility
+toggleTreeVisualization()
 
-// Available classes
+// Available classes from the TreeVisualization namespace
 window.TreeVisualization.AdvancedNode
 window.TreeVisualization.LogicGraph
 window.TreeVisualization.TreeLayout
@@ -241,6 +247,13 @@ window.TreeVisualization.CanvasRenderer
 window.TreeVisualization.TreeConfigPanel
 window.TreeVisualization.EnhancedTreeBuilder
 ```
+
+### Distinction Between Tools
+
+- **Existing Tree Builder** (`window.treeBuilder`) - Your main decision tree builder with SVG rendering
+- **Visualization Engine** (`window.treeVisualizer`) - New canvas-based visualization with advanced layouts
+
+Both tools can coexist without conflicts.
 
 ## Browser Compatibility
 

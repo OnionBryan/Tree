@@ -189,18 +189,18 @@
     <!-- Tree Visualization Engine -->
     <script src="tree-visualization.js"></script>
     <script>
-        let treeBuilder;
+        let treeVisualizer;
 
         // Initialize on DOM load
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Initializing Tree Visualization Demo...');
-            treeBuilder = new TreeVisualization.EnhancedTreeBuilder('builderContainer');
-            console.log('✨ Tree Builder initialized');
+            treeVisualizer = new TreeVisualization.EnhancedTreeBuilder('builderContainer');
+            console.log('✨ Tree Visualizer initialized');
         });
 
         // Create a sample tree with various node types
         function createSampleTree() {
-            const graph = treeBuilder.graph;
+            const graph = treeVisualizer.graph;
 
             // Clear existing nodes
             graph.nodes.clear();
@@ -280,7 +280,7 @@
         // Add a decision node
         function addDecisionNode() {
             const node = new TreeVisualization.AdvancedNode({
-                name: 'Decision ' + (treeBuilder.graph.nodes.size + 1),
+                name: 'Decision ' + (treeVisualizer.graph.nodes.size + 1),
                 nodeType: 'decision',
                 branchCount: 2,
                 position: {
@@ -288,7 +288,7 @@
                     y: Math.random() * 400 - 200
                 }
             });
-            treeBuilder.graph.addNode(node);
+            treeVisualizer.graph.addNode(node);
             console.log('Added decision node:', node.name);
         }
 
@@ -307,13 +307,13 @@
                     y: Math.random() * 400 - 200
                 }
             });
-            treeBuilder.graph.addNode(node);
+            treeVisualizer.graph.addNode(node);
             console.log('Added logic gate:', node.name);
         }
 
         // Apply hierarchical layout
         function applyHierarchicalLayout() {
-            TreeVisualization.TreeLayout.hierarchical(treeBuilder.graph, {
+            TreeVisualization.TreeLayout.hierarchical(treeVisualizer.graph, {
                 levelSeparation: 150,
                 nodeSeparation: 100,
                 direction: 'TB'
@@ -323,7 +323,7 @@
 
         // Apply radial layout
         function applyRadialLayout() {
-            TreeVisualization.TreeLayout.radial(treeBuilder.graph, {
+            TreeVisualization.TreeLayout.radial(treeVisualizer.graph, {
                 radius: 120,
                 centerX: 0,
                 centerY: 0
@@ -333,14 +333,14 @@
 
         // Apply force-directed layout
         function applyForceLayout() {
-            const positions = TreeVisualization.TreeLayout.forceDirected(treeBuilder.graph, {
+            const positions = TreeVisualization.TreeLayout.forceDirected(treeVisualizer.graph, {
                 iterations: 300,
                 idealLength: 150
             });
 
             // Apply positions to nodes
             for (const [nodeId, pos] of positions) {
-                const node = treeBuilder.graph.nodes.get(nodeId);
+                const node = treeVisualizer.graph.nodes.get(nodeId);
                 if (node) {
                     node.position = pos;
                 }
@@ -351,15 +351,15 @@
         // Clear the tree
         function clearTree() {
             if (confirm('Clear the entire tree?')) {
-                treeBuilder.graph.nodes.clear();
-                treeBuilder.graph.edges.clear();
+                treeVisualizer.graph.nodes.clear();
+                treeVisualizer.graph.edges.clear();
                 console.log('Tree cleared');
             }
         }
 
         // Export tree as JSON
         function exportTree() {
-            const data = treeBuilder.graph.toJSON();
+            const data = treeVisualizer.graph.toJSON();
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
 
