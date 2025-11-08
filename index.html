@@ -612,6 +612,7 @@
             <button onclick="runSurvey()">Run Survey</button>
             <button onclick="uploadSurveyData()">Upload Survey Data</button>
             <button onclick="showStatisticalAnalysis()">Statistical Analysis</button>
+            <button onclick="showLinguisticAnalysis()" style="background: linear-gradient(135deg, #6A1B9A, #AB47BC);">🔍 Linguistic Analysis</button>
             <button onclick="saveTreeConfiguration()">Save Tree</button>
             <button onclick="loadTreeConfiguration()">Load Tree</button>
             <button onclick="showTreeTemplates()" style="background: linear-gradient(135deg, #0039A6, #00AEEF);">📋 Templates</button>
@@ -6854,7 +6855,9 @@ You can now:
             `;
             
             Object.entries(pathCounts).sort((a, b) => b[1] - a[1]).forEach(([path, count]) => {
-                const percentage = ((count / results.length) * 100).toFixed(1);
+                const percentage = results.length > 0
+                    ? ((count / results.length) * 100).toFixed(1)
+                    : '0.0';
                 html += `
                     <tr>
                         <td style="padding: 10px; border: 1px solid #ddd;">${path}</td>
@@ -6878,10 +6881,15 @@ You can now:
             `;
             
             Object.entries(nodeScores).forEach(([nodeId, data]) => {
+                // Validate scores array before calculations
+                if (!Array.isArray(data.scores) || data.scores.length === 0) {
+                    return; // Skip nodes with no data
+                }
+
                 const avg = (data.scores.reduce((a, b) => a + b, 0) / data.scores.length).toFixed(2);
                 const min = Math.min(...data.scores).toFixed(1);
                 const max = Math.max(...data.scores).toFixed(1);
-                
+
                 html += `
                     <tr>
                         <td style="padding: 10px; border: 1px solid #ddd;">${data.question}</td>
@@ -7194,7 +7202,9 @@ You can now:
                 overallStdDev: calculateStdDev(allScores).toFixed(2),
                 overallMedian: calculateMedian(allScores).toFixed(2),
                 uniquePaths: Object.keys(pathGroups).length,
-                avgPathLength: (window.batchResults.reduce((sum, r) => sum + r.path.length, 0) / window.batchResults.length).toFixed(2),
+                avgPathLength: window.batchResults.length > 0
+                    ? (window.batchResults.reduce((sum, r) => sum + r.path.length, 0) / window.batchResults.length).toFixed(2)
+                    : '0.00',
                 completionRate: '100%' // All uploaded responses are complete
             };
 
@@ -7204,25 +7214,67 @@ You can now:
             return stats;
         }
 
+        /**
+         * Calculates sample standard deviation using Bessel's correction (n-1).
+         * Uses unbiased estimator: s = √[Σ(xi - x̄)² / (n-1)]
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Sample standard deviation (0 for n < 2)
+         */
         function calculateStdDev(values) {
-            const mean = values.reduce((a, b) => a + b, 0) / values.length;
-            const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
-            return Math.sqrt(variance);
+            if (!Array.isArray(values) || values.length < 2) {
+                return 0; // Need at least 2 values for sample std dev
+            }
+
+            const n = values.length;
+            const mean = values.reduce((a, b) => a + b, 0) / n;
+            const sumSquaredDiff = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0);
+
+            // Use Bessel's correction (n-1) for unbiased sample variance
+            const sampleVariance = sumSquaredDiff / (n - 1);
+
+            return Math.sqrt(sampleVariance);
         }
 
+        /**
+         * Calculates the median (50th percentile) of an array.
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Median value (0 for empty arrays)
+         */
         function calculateMedian(values) {
+            if (!Array.isArray(values) || values.length === 0) {
+                return 0;
+            }
+
             const sorted = [...values].sort((a, b) => a - b);
             const mid = Math.floor(sorted.length / 2);
             return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
         }
 
+        /**
+         * Calculates the mode (most frequent value) of an array.
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {string} Comma-separated mode values, or 'N/A' for empty arrays
+         */
         function calculateMode(values) {
+            if (!Array.isArray(values) || values.length === 0) {
+                return 'N/A';
+            }
+
             const counts = {};
             values.forEach(v => {
-                const rounded = v.toFixed(1);
-                counts[rounded] = (counts[rounded] || 0) + 1;
+                if (typeof v === 'number' && isFinite(v)) {
+                    const rounded = v.toFixed(1);
+                    counts[rounded] = (counts[rounded] || 0) + 1;
+                }
             });
-            
+
+            if (Object.keys(counts).length === 0) {
+                return 'N/A';
+            }
+
             let maxCount = 0;
             let modes = [];
             Object.entries(counts).forEach(([value, count]) => {
@@ -7233,15 +7285,25 @@ You can now:
                     modes.push(value);
                 }
             });
-            
-            return modes.join(', ');
+
+            return modes.length > 0 ? modes.join(', ') : 'N/A';
         }
 
+        /**
+         * Calculates quartiles (Q1, Q3) and interquartile range (IQR).
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {Object} Object with q1, q3, and iqr properties
+         */
         function calculateQuartiles(values) {
+            if (!Array.isArray(values) || values.length === 0) {
+                return { q1: '0.00', q3: '0.00', iqr: '0.00' };
+            }
+
             const sorted = [...values].sort((a, b) => a - b);
             const q1Index = Math.floor(sorted.length * 0.25);
             const q3Index = Math.floor(sorted.length * 0.75);
-            
+
             return {
                 q1: sorted[q1Index].toFixed(2),
                 q3: sorted[q3Index].toFixed(2),
@@ -7249,30 +7311,93 @@ You can now:
             };
         }
 
+        /**
+         * Calculates sample skewness using adjusted Fisher-Pearson coefficient.
+         * Formula: g₁ = [n/((n-1)(n-2))] × Σ[(xi - x̄)/s]³
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Sample skewness (0 for n < 3 or zero variance)
+         */
         function calculateSkewness(values) {
+            if (!Array.isArray(values) || values.length < 3) {
+                return 0; // Need at least 3 values for sample skewness
+            }
+
             const n = values.length;
             const mean = values.reduce((a, b) => a + b, 0) / n;
+            const m2 = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+
+            // Check for zero variance (constant values)
+            if (m2 === 0 || !isFinite(m2)) {
+                return 0;
+            }
+
             const m3 = values.reduce((a, b) => a + Math.pow(b - mean, 3), 0) / n;
-            const m2 = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
-            return m3 / Math.pow(m2, 1.5);
+            const denominator = Math.pow(m2, 1.5);
+
+            if (denominator === 0 || !isFinite(denominator)) {
+                return 0;
+            }
+
+            const skewness = m3 / denominator;
+            return isFinite(skewness) ? skewness : 0;
         }
 
+        /**
+         * Calculates sample excess kurtosis (Fisher's definition, normal = 0).
+         * Formula: g₂ = [m₄/m₂²] - 3
+         *
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Excess kurtosis (0 for n < 4 or zero variance)
+         */
         function calculateKurtosis(values) {
+            if (!Array.isArray(values) || values.length < 4) {
+                return 0; // Need at least 4 values for sample kurtosis
+            }
+
             const n = values.length;
             const mean = values.reduce((a, b) => a + b, 0) / n;
-            const m4 = values.reduce((a, b) => a + Math.pow(b - mean, 4), 0) / n;
             const m2 = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
-            return (m4 / Math.pow(m2, 2)) - 3;
+
+            // Check for zero variance (constant values)
+            if (m2 === 0 || !isFinite(m2)) {
+                return 0;
+            }
+
+            const m4 = values.reduce((a, b) => a + Math.pow(b - mean, 4), 0) / n;
+            const denominator = Math.pow(m2, 2);
+
+            if (denominator === 0 || !isFinite(denominator)) {
+                return 0;
+            }
+
+            const kurtosis = (m4 / denominator) - 3;
+            return isFinite(kurtosis) ? kurtosis : 0;
         }
 
+        /**
+         * Calculates confidence interval for sample mean.
+         * Uses z = 1.96 for 95% confidence (normal approximation).
+         *
+         * @param {number[]} values - Array of numeric values
+         * @param {number} confidence - Confidence level (default 0.95)
+         * @returns {Object} Object with lower and upper bounds
+         */
         function calculateConfidenceInterval(values, confidence = 0.95) {
+            if (!Array.isArray(values) || values.length < 2) {
+                return { lower: '0.00', upper: '0.00' };
+            }
+
             const mean = values.reduce((a, b) => a + b, 0) / values.length;
             const stdErr = calculateStdDev(values) / Math.sqrt(values.length);
-            const z = 1.96; // For 95% confidence
-            
+            const z = 1.96; // For 95% confidence interval
+
+            const lower = mean - z * stdErr;
+            const upper = mean + z * stdErr;
+
             return {
-                lower: (mean - z * stdErr).toFixed(2),
-                upper: (mean + z * stdErr).toFixed(2)
+                lower: isFinite(lower) ? lower.toFixed(2) : '0.00',
+                upper: isFinite(upper) ? upper.toFixed(2) : '0.00'
             };
         }
 
@@ -7319,18 +7444,46 @@ You can now:
             return correlations;
         }
 
+        /**
+         * Calculates Pearson correlation coefficient between two variables.
+         * Formula: r = [n∑xy - ∑x∑y] / √[(n∑x² - (∑x)²)(n∑y² - (∑y)²)]
+         *
+         * @param {number[]} x - First variable array
+         * @param {number[]} y - Second variable array
+         * @returns {number} Correlation coefficient in range [-1, 1] (0 for invalid inputs)
+         */
         function calculatePearsonCorrelation(x, y) {
+            // Validate inputs
+            if (!Array.isArray(x) || !Array.isArray(y) || x.length !== y.length || x.length < 2) {
+                return 0;
+            }
+
             const n = x.length;
             const sumX = x.reduce((a, b) => a + b, 0);
             const sumY = y.reduce((a, b) => a + b, 0);
             const sumXY = x.reduce((total, xi, i) => total + xi * y[i], 0);
             const sumX2 = x.reduce((a, b) => a + b * b, 0);
             const sumY2 = y.reduce((a, b) => a + b * b, 0);
-            
+
             const numerator = n * sumXY - sumX * sumY;
-            const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-            
-            return denominator === 0 ? 0 : numerator / denominator;
+            const varianceX = n * sumX2 - sumX * sumX;
+            const varianceY = n * sumY2 - sumY * sumY;
+
+            // Check for zero or negative variance (constant values or numerical errors)
+            if (varianceX <= 0 || varianceY <= 0) {
+                return 0;
+            }
+
+            const denominator = Math.sqrt(varianceX * varianceY);
+
+            if (denominator === 0 || !isFinite(denominator)) {
+                return 0;
+            }
+
+            const correlation = numerator / denominator;
+
+            // Clamp to [-1, 1] to handle floating-point precision errors
+            return Math.max(-1, Math.min(1, isFinite(correlation) ? correlation : 0));
         }
 
         function displayStatisticalAnalysisModal(stats) {
@@ -7755,12 +7908,17 @@ You can now:
                 pathDistribution[pathKey] = (pathDistribution[pathKey] || 0) + 1;
             });
             
-            const pathProbabilities = Object.values(pathDistribution).map(count => 
-                count / window.batchResults.length
-            );
-            analysis.pathEntropy = -pathProbabilities.reduce((sum, p) => 
-                sum + (p > 0 ? p * Math.log2(p) : 0), 0
-            );
+            // Calculate path entropy H(X) = -Σ p(x) log₂ p(x)
+            if (window.batchResults.length > 0) {
+                const pathProbabilities = Object.values(pathDistribution).map(count =>
+                    count / window.batchResults.length
+                );
+                analysis.pathEntropy = -pathProbabilities.reduce((sum, p) =>
+                    sum + (p > 0 ? p * Math.log2(p) : 0), 0
+                );
+            } else {
+                analysis.pathEntropy = 0;
+            }
 
             // Calculate surprise for each score value and path
             const scoreOccurrences = {};
@@ -7780,35 +7938,50 @@ You can now:
             const totalScores = window.batchResults.reduce((sum, r) => sum + r.path.length, 0);
 
             // Calculate surprise for each score value
-            Object.entries(scoreOccurrences).forEach(([score, count]) => {
-                const probability = count / totalScores;
-                const surprise = -Math.log2(probability);
-                analysis.surprise[`score_${score}`] = {
-                    value: parseInt(score),
-                    probability: probability,
-                    surprise: surprise,
-                    occurrences: count,
-                    interpretation: surprise > 4 ? 'Very surprising' : 
-                                  surprise > 2 ? 'Moderately surprising' : 
-                                  surprise > 1 ? 'Slightly surprising' : 'Expected'
-                };
-                totalSurprise += surprise * count;
-                surpriseCount += count;
-            });
+            if (totalScores > 0) {
+                Object.entries(scoreOccurrences).forEach(([score, count]) => {
+                    const probability = count / totalScores;
+
+                    // Shannon surprise: I(x) = -log₂(p(x))
+                    // Only calculate if probability is valid
+                    const surprise = (probability > 0 && probability <= 1)
+                        ? -Math.log2(probability)
+                        : 0;
+
+                    analysis.surprise[`score_${score}`] = {
+                        value: parseInt(score),
+                        probability: probability,
+                        surprise: surprise,
+                        occurrences: count,
+                        interpretation: surprise > 4 ? 'Very surprising' :
+                                      surprise > 2 ? 'Moderately surprising' :
+                                      surprise > 1 ? 'Slightly surprising' : 'Expected'
+                    };
+                    totalSurprise += surprise * count;
+                    surpriseCount += count;
+                });
+            }
 
             // Calculate surprise for each path
-            Object.entries(pathDistribution).forEach(([path, count]) => {
-                const probability = count / window.batchResults.length;
-                const surprise = -Math.log2(probability);
-                pathSurprises[path] = {
-                    probability: probability,
-                    surprise: surprise,
-                    occurrences: count,
-                    interpretation: surprise > 5 ? 'Extremely rare path' :
-                                  surprise > 3 ? 'Uncommon path' :
-                                  surprise > 1 ? 'Moderate frequency' : 'Common path'
-                };
-            });
+            if (window.batchResults.length > 0) {
+                Object.entries(pathDistribution).forEach(([path, count]) => {
+                    const probability = count / window.batchResults.length;
+
+                    // Shannon surprise: I(x) = -log₂(p(x))
+                    const surprise = (probability > 0 && probability <= 1)
+                        ? -Math.log2(probability)
+                        : 0;
+
+                    pathSurprises[path] = {
+                        probability: probability,
+                        surprise: surprise,
+                        occurrences: count,
+                        interpretation: surprise > 5 ? 'Extremely rare path' :
+                                      surprise > 3 ? 'Uncommon path' :
+                                      surprise > 1 ? 'Moderate frequency' : 'Common path'
+                    };
+                });
+            }
 
             // Calculate surprise for branch decisions at each node
             treeBuilder.nodes.forEach(node => {
@@ -10317,6 +10490,589 @@ You can now:
         window.redoAction = function() {
             console.log('Redo functionality will be implemented soon');
         };
+
+        // ============================================================================
+        // LINGUISTIC FEATURE EXTRACTION SYSTEM
+        // Analyzes survey question text for psychological and stylistic patterns
+        // ============================================================================
+
+        /**
+         * Tokenizes text into words with proper normalization.
+         *
+         * @param {string} text - Input text to tokenize
+         * @returns {string[]} Array of lowercase tokens
+         */
+        function tokenizeText(text) {
+            if (!text || typeof text !== 'string') {
+                return [];
+            }
+
+            // Simple but effective tokenization for English
+            return text.toLowerCase()
+                .replace(/[^\w\s'-]/g, ' ') // Keep apostrophes and hyphens
+                .split(/\s+/)
+                .filter(t => t.length > 0);
+        }
+
+        /**
+         * Splits text into sentences.
+         *
+         * @param {string} text - Input text
+         * @returns {string[]} Array of sentences
+         */
+        function sentenceSplit(text) {
+            if (!text || typeof text !== 'string') {
+                return [];
+            }
+
+            // Split on sentence boundaries
+            return text.split(/[.!?]+/)
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+        }
+
+        // ============================================================================
+        // 1. LEXICAL RICHNESS FEATURES
+        // ============================================================================
+
+        /**
+         * Calculates Type-Token Ratio (TTR) and vocabulary diversity.
+         * TTR = (unique words / total words)
+         *
+         * High TTR indicates rich, varied vocabulary.
+         * Low TTR indicates repetitive language.
+         *
+         * @param {string} text - Input text
+         * @returns {Object} Lexical diversity metrics
+         */
+        function extractLexicalFeatures(text) {
+            const tokens = tokenizeText(text);
+            const features = {};
+
+            if (tokens.length === 0) {
+                return {
+                    ttr: 0.0,
+                    mattr: 0.0,
+                    hapaxRatio: 0.0,
+                    uniqueWords: 0,
+                    totalWords: 0
+                };
+            }
+
+            // Type-Token Ratio
+            const uniqueTokens = new Set(tokens);
+            features.ttr = uniqueTokens.size / tokens.length;
+            features.uniqueWords = uniqueTokens.size;
+            features.totalWords = tokens.length;
+
+            // Moving Average Type-Token Ratio (MATTR)
+            // More robust than TTR for varying text lengths
+            const window = Math.min(50, tokens.length);
+            const mattrScores = [];
+
+            for (let i = 0; i <= tokens.length - window; i++) {
+                const windowTokens = tokens.slice(i, i + window);
+                const windowUnique = new Set(windowTokens);
+                mattrScores.push(windowUnique.size / window);
+            }
+
+            features.mattr = mattrScores.length > 0
+                ? mattrScores.reduce((a, b) => a + b, 0) / mattrScores.length
+                : features.ttr;
+
+            // Hapax Legomena ratio (words appearing exactly once)
+            // High hapax = rich vocabulary, low repetition
+            const wordFreq = {};
+            tokens.forEach(t => {
+                wordFreq[t] = (wordFreq[t] || 0) + 1;
+            });
+
+            const hapaxCount = Object.values(wordFreq).filter(count => count === 1).length;
+            features.hapaxRatio = hapaxCount / tokens.length;
+
+            return features;
+        }
+
+        // ============================================================================
+        // 2. SENTENCE COMPLEXITY FEATURES
+        // ============================================================================
+
+        /**
+         * Analyzes sentence length and complexity patterns.
+         *
+         * @param {string} text - Input text
+         * @returns {Object} Syntax complexity metrics
+         */
+        function extractSyntaxFeatures(text) {
+            const sentences = sentenceSplit(text);
+            const tokens = tokenizeText(text);
+            const features = {};
+
+            if (sentences.length === 0) {
+                return {
+                    meanSentLength: 0.0,
+                    sentLengthStd: 0.0,
+                    subordinateDensity: 0.0,
+                    clauseComplexity: 0.0
+                };
+            }
+
+            // Mean sentence length (in words)
+            const sentLengths = sentences.map(s => tokenizeText(s).length);
+            features.meanSentLength = sentLengths.reduce((a, b) => a + b, 0) / sentLengths.length;
+
+            // Sentence length variance (measures style consistency)
+            if (sentLengths.length >= 2) {
+                const mean = features.meanSentLength;
+                const variance = sentLengths.reduce((sum, len) =>
+                    sum + Math.pow(len - mean, 2), 0) / (sentLengths.length - 1);
+                features.sentLengthStd = Math.sqrt(variance);
+            } else {
+                features.sentLengthStd = 0.0;
+            }
+
+            // Subordinate clause density
+            const subordinators = ['because', 'although', 'while', 'since', 'unless',
+                                 'whereas', 'though', 'if', 'when', 'where'];
+            const subordinateCount = subordinators.reduce((count, word) =>
+                count + tokens.filter(t => t === word).length, 0);
+
+            features.subordinateDensity = subordinateCount / sentences.length;
+
+            // Clause complexity score
+            features.clauseComplexity = (features.meanSentLength / 10) * (1 + features.subordinateDensity);
+
+            return features;
+        }
+
+        // ============================================================================
+        // 3. PUNCTUATION PATTERN FEATURES
+        // ============================================================================
+
+        /**
+         * Analyzes punctuation usage patterns.
+         *
+         * @param {string} text - Input text
+         * @returns {Object} Punctuation metrics
+         */
+        function extractPunctuationFeatures(text) {
+            const features = {};
+            const textLen = text.length || 1; // Avoid division by zero
+
+            features.exclamationRatio = (text.match(/!/g) || []).length / textLen;
+            features.questionRatio = (text.match(/\?/g) || []).length / textLen;
+            features.ellipsisRatio = (text.match(/\.\.\./g) || []).length / textLen;
+            features.dashRatio = (text.match(/—|--/g) || []).length / textLen;
+            features.parenRatio = (text.match(/\(/g) || []).length / textLen;
+            features.commaRatio = (text.match(/,/g) || []).length / textLen;
+            features.colonRatio = (text.match(/:/g) || []).length / textLen;
+
+            return features;
+        }
+
+        // ============================================================================
+        // 4. FUNCTION WORD ANALYSIS (LIWC-style)
+        // ============================================================================
+
+        /**
+         * Analyzes function words and pronouns (psychological indicators).
+         *
+         * @param {string} text - Input text
+         * @returns {Object} Function word metrics
+         */
+        function extractFunctionWordFeatures(text) {
+            const tokens = tokenizeText(text);
+            const total = tokens.length || 1;
+            const features = {};
+
+            // First person singular pronouns
+            const iPronouns = ['i', 'me', 'my', 'mine', 'myself'];
+            features.iPronounRatio = iPronouns.reduce((count, p) =>
+                count + tokens.filter(t => t === p).length, 0) / total;
+
+            // First person plural pronouns
+            const wePronouns = ['we', 'us', 'our', 'ours', 'ourselves'];
+            features.wePronounRatio = wePronouns.reduce((count, p) =>
+                count + tokens.filter(t => t === p).length, 0) / total;
+
+            // Second person pronouns
+            const youPronouns = ['you', 'your', 'yours', 'yourself'];
+            features.youPronounRatio = youPronouns.reduce((count, p) =>
+                count + tokens.filter(t => t === p).length, 0) / total;
+
+            // Cognitive process words
+            const cognitiveWords = ['think', 'know', 'believe', 'understand',
+                                  'realize', 'consider', 'wonder', 'imagine'];
+            features.cognitiveRatio = cognitiveWords.reduce((count, w) =>
+                count + tokens.filter(t => t === w).length, 0) / total;
+
+            // Tentative words
+            const tentativeWords = ['maybe', 'perhaps', 'possibly', 'probably',
+                                  'seems', 'apparently', 'might', 'could'];
+            features.tentativeRatio = tentativeWords.reduce((count, w) =>
+                count + tokens.filter(t => t === w).length, 0) / total;
+
+            // Certainty words
+            const certaintyWords = ['always', 'never', 'definitely', 'certainly',
+                                  'absolutely', 'must', 'will', 'shall'];
+            features.certaintyRatio = certaintyWords.reduce((count, w) =>
+                count + tokens.filter(t => t === w).length, 0) / total;
+
+            // Social process words
+            const socialWords = ['friend', 'family', 'people', 'relationship',
+                               'love', 'care', 'feel', 'talk', 'listen'];
+            features.socialRatio = socialWords.reduce((count, w) =>
+                count + tokens.filter(t => t === w).length, 0) / total;
+
+            return features;
+        }
+
+        // ============================================================================
+        // 5. READABILITY METRICS
+        // ============================================================================
+
+        /**
+         * Calculates Flesch Reading Ease and related readability scores.
+         * Formula: 206.835 - 1.015(words/sentences) - 84.6(syllables/words)
+         *
+         * @param {string} text - Input text
+         * @returns {Object} Readability metrics
+         */
+        function extractReadabilityFeatures(text) {
+            const features = {};
+            const sentences = sentenceSplit(text);
+            const tokens = tokenizeText(text);
+
+            if (sentences.length === 0 || tokens.length === 0) {
+                return {
+                    fleschReadingEase: 0.0,
+                    avgWordLength: 0.0,
+                    avgSyllablesPerWord: 0.0,
+                    complexWordRatio: 0.0
+                };
+            }
+
+            // Count syllables (simplified algorithm)
+            function countSyllables(word) {
+                if (word.length <= 3) return 1;
+
+                // Count vowel groups
+                word = word.toLowerCase();
+                let count = 0;
+                let prevWasVowel = false;
+
+                for (let char of word) {
+                    const isVowel = 'aeiouy'.includes(char);
+                    if (isVowel && !prevWasVowel) {
+                        count++;
+                    }
+                    prevWasVowel = isVowel;
+                }
+
+                // Adjust for silent e
+                if (word.endsWith('e')) {
+                    count = Math.max(1, count - 1);
+                }
+
+                return Math.max(1, count);
+            }
+
+            const syllables = tokens.map(countSyllables);
+            const totalSyllables = syllables.reduce((a, b) => a + b, 0);
+
+            // Flesch Reading Ease
+            const wordsPerSentence = tokens.length / sentences.length;
+            const syllablesPerWord = totalSyllables / tokens.length;
+
+            features.fleschReadingEase = 206.835 -
+                                        1.015 * wordsPerSentence -
+                                        84.6 * syllablesPerWord;
+
+            // Clamp to valid range [0, 100]
+            features.fleschReadingEase = Math.max(0, Math.min(100, features.fleschReadingEase));
+
+            features.avgWordLength = tokens.reduce((sum, t) => sum + t.length, 0) / tokens.length;
+            features.avgSyllablesPerWord = syllablesPerWord;
+
+            // Complex words (3+ syllables)
+            const complexWords = syllables.filter(s => s >= 3).length;
+            features.complexWordRatio = complexWords / tokens.length;
+
+            return features;
+        }
+
+        // ============================================================================
+        // 6. SENTIMENT ANALYSIS (Simplified)
+        // ============================================================================
+
+        /**
+         * Simple sentiment analysis based on word lists.
+         *
+         * @param {string} text - Input text
+         * @returns {Object} Sentiment metrics
+         */
+        function extractSentimentFeatures(text) {
+            const tokens = tokenizeText(text);
+            const total = tokens.length || 1;
+            const features = {};
+
+            // Positive words
+            const positiveWords = ['good', 'great', 'excellent', 'amazing', 'wonderful',
+                                 'best', 'better', 'happy', 'love', 'enjoy', 'like',
+                                 'nice', 'perfect', 'beautiful', 'awesome'];
+            const positiveCount = positiveWords.reduce((count, w) =>
+                count + tokens.filter(t => t === w).length, 0);
+
+            // Negative words
+            const negativeWords = ['bad', 'terrible', 'awful', 'worst', 'hate',
+                                 'dislike', 'poor', 'wrong', 'never', 'no', 'not',
+                                 'difficult', 'hard', 'problem', 'issue'];
+            const negativeCount = negativeWords.reduce((count, w) =>
+                count + tokens.filter(t => t === w).length, 0);
+
+            features.positiveRatio = positiveCount / total;
+            features.negativeRatio = negativeCount / total;
+            features.sentimentPolarity = (positiveCount - negativeCount) / total;
+
+            // Emotional intensity words
+            const intensityWords = ['very', 'extremely', 'really', 'quite', 'absolutely'];
+            features.intensityRatio = intensityWords.reduce((count, w) =>
+                count + tokens.filter(t => t === w).length, 0) / total;
+
+            return features;
+        }
+
+        // ============================================================================
+        // 7. QUESTION TYPE DETECTION (Survey-Specific)
+        // ============================================================================
+
+        /**
+         * Detects survey question types and framing.
+         *
+         * @param {string} text - Question text
+         * @returns {Object} Question type features
+         */
+        function extractQuestionTypeFeatures(text) {
+            const features = {};
+            const lowerText = text.toLowerCase();
+
+            // Question type indicators
+            features.isYesNo = /\b(yes|no)\b/.test(lowerText) ||
+                             /\b(agree|disagree)\b/.test(lowerText);
+
+            features.isScale = /\b(scale|rate|rank|score)\b/.test(lowerText) ||
+                             /\b(1|2|3|4|5)\b/.test(lowerText);
+
+            features.isOpenEnded = lowerText.includes('how') || lowerText.includes('why') ||
+                                 lowerText.includes('describe') || lowerText.includes('explain');
+
+            features.isMultipleChoice = /\b(choose|select)\b/.test(lowerText) ||
+                                      lowerText.includes('which');
+
+            // Framing detection
+            features.isPositivelyFramed = /\b(agree|support|favor|like|enjoy)\b/.test(lowerText);
+            features.isNegativelyFramed = /\b(disagree|oppose|dislike|against|problem)\b/.test(lowerText);
+
+            // Leading question detection
+            const leadingIndicators = ['should', 'must', 'ought to', 'don\'t you think',
+                                     'wouldn\'t you agree', 'obviously', 'clearly'];
+            features.isLeading = leadingIndicators.some(indicator =>
+                lowerText.includes(indicator));
+
+            return features;
+        }
+
+        // ============================================================================
+        // 8. MASTER LINGUISTIC ANALYSIS FUNCTION
+        // ============================================================================
+
+        /**
+         * Extracts comprehensive linguistic features from text.
+         *
+         * @param {string} text - Input text to analyze
+         * @returns {Object} Complete feature set (~50 features)
+         */
+        function analyzeLinguisticFeatures(text) {
+            if (!text || typeof text !== 'string' || text.trim().length === 0) {
+                return null;
+            }
+
+            const features = {
+                text: text,
+                timestamp: new Date().toISOString()
+            };
+
+            // Extract all feature sets
+            Object.assign(features, extractLexicalFeatures(text));
+            Object.assign(features, extractSyntaxFeatures(text));
+            Object.assign(features, extractPunctuationFeatures(text));
+            Object.assign(features, extractFunctionWordFeatures(text));
+            Object.assign(features, extractReadabilityFeatures(text));
+            Object.assign(features, extractSentimentFeatures(text));
+            Object.assign(features, extractQuestionTypeFeatures(text));
+
+            return features;
+        }
+
+        /**
+         * Analyzes all questions in the decision tree.
+         *
+         * @returns {Array} Array of linguistic analysis results
+         */
+        function analyzeAllTreeQuestions() {
+            const analyses = [];
+
+            treeBuilder.nodes.forEach(node => {
+                if (node.question) {
+                    const analysis = analyzeLinguisticFeatures(node.question);
+                    if (analysis) {
+                        analysis.nodeId = node.id;
+                        analysis.depth = node.depth;
+                        analysis.isTerminal = node.isTerminal || false;
+                        analyses.push(analysis);
+                    }
+                }
+            });
+
+            return analyses;
+        }
+
+        /**
+         * Displays linguistic analysis modal for all questions.
+         */
+        function showLinguisticAnalysis() {
+            const analyses = analyzeAllTreeQuestions();
+
+            if (analyses.length === 0) {
+                alert('No questions to analyze. Add some nodes first!');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 4000; overflow-y: auto;';
+
+            const content = document.createElement('div');
+            content.style.cssText = 'position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: white; padding: 30px; border-radius: 15px; width: 95%; max-width: 1200px; max-height: 90vh; overflow-y: auto;';
+
+            let html = `
+                <h2>🔍 Linguistic Analysis of Survey Questions</h2>
+                <p><strong>Total Questions Analyzed:</strong> ${analyses.length}</p>
+
+                <h3>Summary Statistics</h3>
+                <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px;">
+                    <tr style="background: #f5f5f5;">
+                        <th style="padding: 10px; border: 1px solid #ddd;">Metric</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Mean</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Median</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Std Dev</th>
+                    </tr>
+            `;
+
+            // Calculate summary statistics
+            const metrics = ['ttr', 'meanSentLength', 'fleschReadingEase', 'avgWordLength'];
+            metrics.forEach(metric => {
+                const values = analyses.map(a => a[metric] || 0).filter(v => isFinite(v));
+                if (values.length > 0) {
+                    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+                    const sorted = [...values].sort((a, b) => a - b);
+                    const median = sorted.length % 2 === 0
+                        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+                        : sorted[Math.floor(sorted.length / 2)];
+
+                    const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / Math.max(1, values.length - 1);
+                    const stdDev = Math.sqrt(variance);
+
+                    html += `
+                        <tr>
+                            <td style="padding: 10px; border: 1px solid #ddd;"><strong>${metric}</strong></td>
+                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${mean.toFixed(3)}</td>
+                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${median.toFixed(3)}</td>
+                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${stdDev.toFixed(3)}</td>
+                        </tr>
+                    `;
+                }
+            });
+
+            html += `</table>
+
+                <h3>Question-by-Question Analysis</h3>
+                <div style="max-height: 500px; overflow-y: auto;">
+            `;
+
+            analyses.forEach((analysis, idx) => {
+                html += `
+                    <div style="margin: 15px 0; padding: 15px; border: 1px solid #ddd; border-radius: 10px; background: #f9f9f9;">
+                        <h4 style="margin-bottom: 10px;">Q${idx + 1}: "${analysis.text}"</h4>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-size: 12px;">
+                            <div><strong>TTR:</strong> ${analysis.ttr.toFixed(3)}</div>
+                            <div><strong>Words:</strong> ${analysis.totalWords}</div>
+                            <div><strong>Unique:</strong> ${analysis.uniqueWords}</div>
+                            <div><strong>Readability:</strong> ${analysis.fleschReadingEase.toFixed(1)}</div>
+                            <div><strong>Avg Word Len:</strong> ${analysis.avgWordLength.toFixed(2)}</div>
+                            <div><strong>Sent Complexity:</strong> ${analysis.clauseComplexity.toFixed(2)}</div>
+                        </div>
+                        <div style="margin-top: 10px; font-size: 12px;">
+                            ${analysis.isLeading ? '<span style="color: #ff9800;">⚠️ Potentially leading question</span>' : ''}
+                            ${analysis.isYesNo ? '<span style="color: #4CAF50;">✓ Yes/No format</span>' : ''}
+                            ${analysis.isScale ? '<span style="color: #2196F3;">📊 Scale format</span>' : ''}
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                </div>
+                <div style="margin-top: 20px;">
+                    <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" style="padding: 10px 20px; background: #ccc; border: none; border-radius: 5px; cursor: pointer;">Close</button>
+                    <button onclick="exportLinguisticAnalysis()" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">Export CSV</button>
+                </div>
+            `;
+
+            content.innerHTML = html;
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+
+            // Store for export
+            window.currentLinguisticAnalyses = analyses;
+        }
+
+        /**
+         * Exports linguistic analysis to CSV.
+         */
+        function exportLinguisticAnalysis() {
+            if (!window.currentLinguisticAnalyses || window.currentLinguisticAnalyses.length === 0) {
+                alert('No analysis data to export');
+                return;
+            }
+
+            const analyses = window.currentLinguisticAnalyses;
+
+            // Build CSV
+            const headers = ['nodeId', 'question', 'ttr', 'totalWords', 'uniqueWords',
+                           'meanSentLength', 'fleschReadingEase', 'sentimentPolarity',
+                           'cognitiveRatio', 'certaintyRatio', 'isLeading', 'isYesNo'];
+
+            let csv = headers.join(',') + '\n';
+
+            analyses.forEach(a => {
+                const row = headers.map(h => {
+                    const val = a[h];
+                    if (typeof val === 'string') {
+                        return `"${val.replace(/"/g, '""')}"`;
+                    }
+                    return val !== undefined ? val : '';
+                });
+                csv += row.join(',') + '\n';
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `linguistic-analysis-${Date.now()}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
 
         // ============= UI Functions for New Features =============
         
