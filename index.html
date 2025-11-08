@@ -7711,6 +7711,8 @@ You can now:
         // Shannon Information Theory Analysis
         function showShannonAnalysis() {
             const shannonAnalysis = calculateShannonMetrics();
+            // Store for comparison feature
+            window.lastShannonAnalysis = shannonAnalysis;
             displayShannonAnalysisModal(shannonAnalysis);
         }
 
@@ -7927,35 +7929,52 @@ You can now:
                     allScores.push(step.score);
                 });
             });
-            analysis.totalInformation = calculateEntropy(allScores) * allScores.length;
+            // Edge case: Empty scores array
+            analysis.totalInformation = allScores.length > 0 ?
+                calculateEntropy(allScores) * allScores.length : 0;
 
             // Calculate redundancy (how much information is repeated across nodes)
             const uniqueInformation = Object.values(analysis.nodeEntropy)
                 .reduce((sum, node) => sum + node.entropy, 0);
             const theoreticalMaxInfo = Math.log2(11) * treeBuilder.nodes.size;
-            analysis.redundancy = 1 - (uniqueInformation / theoreticalMaxInfo);
+            // Edge case: No nodes means no redundancy to calculate
+            analysis.redundancy = theoreticalMaxInfo > 0 ?
+                1 - (uniqueInformation / theoreticalMaxInfo) : 0;
 
             // Add summary metrics
+            const nodeEntropyValues = Object.values(analysis.nodeEntropy);
+            const infoGainValues = Object.values(analysis.informationGain);
+            const nodeEntropyCount = nodeEntropyValues.length;
+
             analysis.summary = {
-                averageNodeEntropy: uniqueInformation / Object.keys(analysis.nodeEntropy).length,
-                maxNodeEntropy: Math.max(...Object.values(analysis.nodeEntropy).map(n => n.entropy)),
-                minNodeEntropy: Math.min(...Object.values(analysis.nodeEntropy).map(n => n.entropy)),
-                averageInfoGain: Object.values(analysis.informationGain).length > 0 ?
-                    Object.values(analysis.informationGain).reduce((sum, ig) => sum + ig.gain, 0) / 
-                    Object.values(analysis.informationGain).length : 0,
+                // Edge case: Empty nodeEntropy object
+                averageNodeEntropy: nodeEntropyCount > 0 ?
+                    uniqueInformation / nodeEntropyCount : 0,
+                maxNodeEntropy: nodeEntropyCount > 0 ?
+                    Math.max(...nodeEntropyValues.map(n => n.entropy)) : 0,
+                minNodeEntropy: nodeEntropyCount > 0 ?
+                    Math.min(...nodeEntropyValues.map(n => n.entropy)) : 0,
+                averageInfoGain: infoGainValues.length > 0 ?
+                    infoGainValues.reduce((sum, ig) => sum + ig.gain, 0) /
+                    infoGainValues.length : 0,
                 pathDiversity: analysis.pathEntropy / Math.log2(Object.keys(pathDistribution).length || 1),
-                decisionEfficiency: Object.values(analysis.informationGain)
-                    .reduce((sum, ig) => sum + ig.efficiency, 0) / 
-                    (Object.values(analysis.informationGain).length || 1)
+                decisionEfficiency: infoGainValues.length > 0 ?
+                    infoGainValues.reduce((sum, ig) => sum + ig.efficiency, 0) /
+                    infoGainValues.length : 0
             };
 
             return analysis;
         }
 
+        /**
+         * Collect score and branching data for a specific node from batch results
+         * @param {string} nodeId - The ID of the node to collect data for
+         * @returns {{scores: number[], branches: {left: number, right: number}, branchProbs: {left: number, right: number}}}
+         */
         function collectNodeData(nodeId) {
             const scores = [];
             const branches = { left: 0, right: 0 };
-            
+
             window.batchResults.forEach(result => {
                 const step = result.path.find(p => p.nodeId === nodeId);
                 if (step) {
@@ -7974,7 +7993,14 @@ You can now:
             return { scores, branches, branchProbs };
         }
 
+        /**
+         * Calculate Shannon entropy of a value distribution
+         * H(X) = -Σ p(x) * log₂(p(x))
+         * @param {number[]} values - Array of numeric values to calculate entropy for
+         * @returns {number} Entropy in bits (0 = no uncertainty, higher = more uncertainty)
+         */
         function calculateEntropy(values) {
+            // Edge case: Empty array has no entropy
             if (values.length === 0) return 0;
 
             // Create bins for the values
@@ -7989,27 +8015,37 @@ You can now:
             const probabilities = Object.values(bins).map(count => count / total);
 
             // Calculate entropy: H = -Σ p(x) * log2(p(x))
-            return -probabilities.reduce((sum, p) => 
+            return -probabilities.reduce((sum, p) =>
                 sum + (p > 0 ? p * Math.log2(p) : 0), 0
             );
         }
 
+        /**
+         * Calculate entropy of binary branching probabilities
+         * @param {{left: number, right: number}} branchProbs - Probabilities for left and right branches
+         * @returns {number} Branch entropy in bits (max 1 bit for perfectly balanced branches)
+         */
         function calculateBranchEntropy(branchProbs) {
             const probs = [branchProbs.left, branchProbs.right].filter(p => p > 0);
             if (probs.length === 0) return 0;
-            
+
             return -probs.reduce((sum, p) => sum + p * Math.log2(p), 0);
         }
 
+        /**
+         * Extract all sequential node pairs from batch results paths
+         * Used for mutual information analysis between adjacent decision nodes
+         * @returns {Array<{node1Id: string, node2Id: string, node1Question: string, node2Question: string}>}
+         */
         function getSequentialNodePairs() {
             const pairs = new Map();
-            
+
             window.batchResults.forEach(result => {
                 for (let i = 0; i < result.path.length - 1; i++) {
                     const node1 = result.path[i];
                     const node2 = result.path[i + 1];
                     const pairKey = `${node1.nodeId}_${node2.nodeId}`;
-                    
+
                     if (!pairs.has(pairKey)) {
                         pairs.set(pairKey, {
                             node1Id: node1.nodeId,
@@ -8020,26 +8056,34 @@ You can now:
                     }
                 }
             });
-            
+
             return Array.from(pairs.values());
         }
 
+        /**
+         * Calculate mutual information between two nodes
+         * I(X;Y) = H(X) + H(Y) - H(X,Y)
+         * Measures how much knowing one node's outcome tells us about the other
+         * @param {string} node1Id - First node ID
+         * @param {string} node2Id - Second node ID
+         * @returns {{mutualInfo: number, entropy1: number, entropy2: number, jointEntropy: number, correlation: number}|null}
+         */
         function calculateMutualInformation(node1Id, node2Id) {
             const joint = [];
             const node1Scores = [];
             const node2Scores = [];
-            
+
             window.batchResults.forEach(result => {
                 const node1Step = result.path.find(p => p.nodeId === node1Id);
                 const node2Step = result.path.find(p => p.nodeId === node2Id);
-                
+
                 if (node1Step && node2Step) {
                     node1Scores.push(Math.round(node1Step.score));
                     node2Scores.push(Math.round(node2Step.score));
                     joint.push([Math.round(node1Step.score), Math.round(node2Step.score)]);
                 }
             });
-            
+
             if (joint.length === 0) return null;
 
             // Calculate individual entropies
@@ -8052,9 +8096,9 @@ You can now:
                 const key = `${v1},${v2}`;
                 jointCounts[key] = (jointCounts[key] || 0) + 1;
             });
-            
+
             const jointProbs = Object.values(jointCounts).map(count => count / joint.length);
-            const jointEntropy = -jointProbs.reduce((sum, p) => 
+            const jointEntropy = -jointProbs.reduce((sum, p) =>
                 sum + (p > 0 ? p * Math.log2(p) : 0), 0
             );
 
@@ -8062,7 +8106,7 @@ You can now:
             const mutualInfo = entropy1 + entropy2 - jointEntropy;
 
             // Calculate normalized correlation (mutual info / min entropy)
-            const correlation = Math.min(entropy1, entropy2) > 0 ? 
+            const correlation = Math.min(entropy1, entropy2) > 0 ?
                 mutualInfo / Math.min(entropy1, entropy2) : 0;
 
             return {
@@ -8074,13 +8118,21 @@ You can now:
             };
         }
 
+        /**
+         * Calculate conditional entropy H(Y|X) - uncertainty in child given parent
+         * H(Y|X) = Σ p(x) * H(Y|X=x)
+         * Lower values indicate stronger dependency between nodes
+         * @param {string} parentId - Parent node ID
+         * @param {string} childId - Child node ID
+         * @returns {number|null} Conditional entropy in bits, or null if no data
+         */
         function calculateConditionalEntropy(parentId, childId) {
             const conditionalData = {};
-            
+
             window.batchResults.forEach(result => {
                 const parentStep = result.path.find(p => p.nodeId === parentId);
                 const childStep = result.path.find(p => p.nodeId === childId);
-                
+
                 if (parentStep && childStep) {
                     const parentBin = Math.round(parentStep.score);
                     if (!conditionalData[parentBin]) {
@@ -8089,7 +8141,7 @@ You can now:
                     conditionalData[parentBin].push(Math.round(childStep.score));
                 }
             });
-            
+
             if (Object.keys(conditionalData).length === 0) return null;
 
             // Calculate H(Y|X) = Σ p(x) * H(Y|X=x)
@@ -8097,6 +8149,9 @@ You can now:
             Object.values(conditionalData).forEach(samples => {
                 totalSamples += samples.length;
             });
+
+            // Edge case: No samples collected
+            if (totalSamples === 0) return null;
 
             let conditionalEntropy = 0;
             Object.entries(conditionalData).forEach(([parentValue, childValues]) => {
@@ -8316,15 +8371,52 @@ You can now:
                         <li><strong>Average Surprise:</strong> Expected surprise across all events (equals entropy when properly weighted)</li>
                     </ul>
                 </div>
-                
-                <div style="margin-top: 20px; display: flex; gap: 10px;">
+
+                <div id="entropy-visualizations" style="margin-top: 30px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; color: white;">
+                    <h3 style="color: white; margin-bottom: 15px;">📊 Entropy Distribution Visualizations</h3>
+                    <div style="background: white; padding: 15px; border-radius: 8px; color: #333;">
+                        <canvas id="entropy-chart" style="width: 100%; height: 200px;"></canvas>
+                        <div id="entropy-bars" style="margin-top: 15px;"></div>
+                    </div>
+                </div>
+
+                <div id="tree-recommendations" style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 10px; color: white;">
+                    <h3 style="color: white; margin-bottom: 15px;">💡 AI-Powered Tree Improvement Recommendations</h3>
+                    <div id="recommendations-content" style="background: white; padding: 15px; border-radius: 8px; color: #333;"></div>
+                </div>
+
+                <div id="tree-comparison" style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border-radius: 10px; color: white;">
+                    <h3 style="color: white; margin-bottom: 15px;">🔄 Tree Comparison Tools</h3>
+                    <div style="background: white; padding: 15px; border-radius: 8px; color: #333;">
+                        <button onclick="saveAnalysisForComparison()" style="padding: 8px 16px; background: #4facfe; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">💾 Save Current Analysis</button>
+                        <button onclick="showComparisonView()" style="padding: 8px 16px; background: #00f2fe; color: white; border: none; border-radius: 5px; cursor: pointer;">📈 Compare Analyses</button>
+                        <div id="comparison-results" style="margin-top: 15px;"></div>
+                    </div>
+                </div>
+
+                <div id="optimization-suggestions" style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); border-radius: 10px; color: white;">
+                    <h3 style="color: white; margin-bottom: 15px;">⚡ Node Reordering Optimization</h3>
+                    <div id="optimization-content" style="background: white; padding: 15px; border-radius: 8px; color: #333;"></div>
+                </div>
+
+                <div style="margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
                     <button onclick="this.closest('[style*=\"position: fixed\"]').remove()" style="padding: 10px 20px; background: #ccc; border: none; border-radius: 5px; cursor: pointer;">Close</button>
-                    <button onclick="exportShannonAnalysis(${JSON.stringify(analysis).replace(/"/g, '&quot;')})" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">Export Analysis</button>
+                    <button onclick="exportShannonAnalysisEnhanced(${JSON.stringify(analysis).replace(/"/g, '&quot;')})" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">📥 Export JSON</button>
+                    <button onclick="exportShannonAnalysisCSV(${JSON.stringify(analysis).replace(/"/g, '&quot;')})" style="padding: 10px 20px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 5px; cursor: pointer;">📊 Export CSV</button>
+                    <button onclick="exportShannonAnalysisExcel(${JSON.stringify(analysis).replace(/"/g, '&quot;')})" style="padding: 10px 20px; background: linear-gradient(135deg, #f093fb, #f5576c); color: white; border: none; border-radius: 5px; cursor: pointer;">📑 Export Excel-Ready</button>
+                    <button onclick="exportShannonAnalysisPDF(${JSON.stringify(analysis).replace(/"/g, '&quot;')})" style="padding: 10px 20px; background: linear-gradient(135deg, #4facfe, #00f2fe); color: white; border: none; border-radius: 5px; cursor: pointer;">📄 Export Report (HTML)</button>
                 </div>
             `;
-            
+
             content.innerHTML = html;
-            
+
+            // Populate the new feature sections after DOM is ready
+            setTimeout(() => {
+                renderEntropyVisualizations(analysis);
+                renderTreeRecommendations(analysis);
+                renderOptimizationSuggestions(analysis);
+            }, 100);
+
             // Add close X button after setting innerHTML
             const closeX = document.createElement('button');
             closeX.innerHTML = '×';
@@ -8350,7 +8442,548 @@ You can now:
             a.click();
             URL.revokeObjectURL(url);
         }
-        
+
+        /**
+         * Feature 1: Render entropy distribution visualizations using HTML/CSS charts
+         * @param {Object} analysis - Shannon analysis data
+         */
+        function renderEntropyVisualizations(analysis) {
+            const container = document.getElementById('entropy-bars');
+            if (!container) return;
+
+            // Edge case: No node entropy data
+            const nodeEntropyValues = Object.values(analysis.nodeEntropy || {});
+            if (nodeEntropyValues.length === 0) {
+                container.innerHTML = '<p style="color: #999; padding: 20px; text-align: center;">No entropy data available yet. Run surveys to see visualizations.</p>';
+                return;
+            }
+
+            // Create bar chart for node entropies
+            const maxEntropy = Math.max(...nodeEntropyValues.map(n => n.entropy), 0.01);
+            let html = '<h4 style="margin-bottom: 15px;">Node Entropy Distribution</h4>';
+
+            nodeEntropyValues.forEach(node => {
+                const percentage = maxEntropy > 0 ? (node.entropy / maxEntropy) * 100 : 0;
+                const color = node.entropy > maxEntropy * 0.7 ? '#e74c3c' :
+                             node.entropy > maxEntropy * 0.4 ? '#f39c12' : '#27ae60';
+
+                html += `
+                    <div style="margin-bottom: 12px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                            <span style="font-weight: 500;">${node.question.substring(0, 35)}...</span>
+                            <span style="font-weight: bold; color: ${color};">${node.entropy.toFixed(3)} bits</span>
+                        </div>
+                        <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 20px; overflow: hidden;">
+                            <div style="width: ${percentage}%; background: ${color}; height: 100%; transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Add information gain visualization
+            const infoGainValues = Object.values(analysis.informationGain || {});
+            if (infoGainValues.length > 0) {
+                const maxGain = Math.max(...infoGainValues.map(ig => ig.gain), 0.01);
+                html += '<h4 style="margin-top: 25px; margin-bottom: 15px;">Information Gain Distribution</h4>';
+
+                infoGainValues.slice(0, 10).forEach(ig => {
+                    const percentage = maxGain > 0 ? (ig.gain / maxGain) * 100 : 0;
+                    const color = ig.gain > maxGain * 0.7 ? '#3498db' :
+                                 ig.gain > maxGain * 0.4 ? '#9b59b6' : '#95a5a6';
+
+                    html += `
+                        <div style="margin-bottom: 12px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                                <span style="font-weight: 500;">${ig.question.substring(0, 35)}...</span>
+                                <span style="font-weight: bold; color: ${color};">IG: ${ig.gain.toFixed(3)}</span>
+                            </div>
+                            <div style="width: 100%; background: #e0e0e0; border-radius: 4px; height: 20px; overflow: hidden;">
+                                <div style="width: ${percentage}%; background: ${color}; height: 100%; transition: width 0.3s ease;"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+
+            container.innerHTML = html;
+        }
+
+        /**
+         * Feature 2: Generate AI-powered tree improvement recommendations
+         * @param {Object} analysis - Shannon analysis data
+         */
+        function renderTreeRecommendations(analysis) {
+            const container = document.getElementById('recommendations-content');
+            if (!container) return;
+
+            const recommendations = generateTreeRecommendations(analysis);
+            let html = '';
+
+            recommendations.forEach((rec, index) => {
+                const icon = rec.priority === 'high' ? '🔴' :
+                            rec.priority === 'medium' ? '🟡' : '🟢';
+                const bgColor = rec.priority === 'high' ? '#fee' :
+                               rec.priority === 'medium' ? '#ffc' : '#efe';
+
+                html += `
+                    <div style="background: ${bgColor}; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid ${rec.priority === 'high' ? '#e74c3c' : rec.priority === 'medium' ? '#f39c12' : '#27ae60'};">
+                        <div style="font-weight: bold; margin-bottom: 5px;">${icon} ${rec.title}</div>
+                        <div style="font-size: 14px; color: #555;">${rec.description}</div>
+                        ${rec.action ? `<div style="margin-top: 8px; font-size: 13px;"><strong>Action:</strong> ${rec.action}</div>` : ''}
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html || '<p style="color: #999;">No recommendations at this time. Your tree looks good!</p>';
+        }
+
+        /**
+         * Generate smart recommendations based on entropy analysis
+         * @param {Object} analysis - Shannon analysis data
+         * @returns {Array<{priority: string, title: string, description: string, action: string}>}
+         */
+        function generateTreeRecommendations(analysis) {
+            const recommendations = [];
+
+            // Edge case: No analysis data
+            if (!analysis || !analysis.summary) return recommendations;
+
+            // Check decision efficiency
+            if (analysis.summary.decisionEfficiency < 0.3) {
+                recommendations.push({
+                    priority: 'high',
+                    title: 'Low Decision Efficiency Detected',
+                    description: `Your tree's decision efficiency is ${(analysis.summary.decisionEfficiency * 100).toFixed(1)}%. Nodes are not splitting data effectively.`,
+                    action: 'Consider reordering nodes to put high information-gain questions earlier in the tree.'
+                });
+            }
+
+            // Check path diversity
+            if (analysis.summary.pathDiversity < 0.5) {
+                recommendations.push({
+                    priority: 'medium',
+                    title: 'Limited Path Diversity',
+                    description: `Path diversity is ${(analysis.summary.pathDiversity * 100).toFixed(1)}%. Users are taking similar paths through your tree.`,
+                    action: 'Add more branching questions or adjust thresholds to create more diverse user experiences.'
+                });
+            }
+
+            // Check redundancy
+            if (analysis.redundancy > 0.7) {
+                recommendations.push({
+                    priority: 'high',
+                    title: 'High Information Redundancy',
+                    description: `${(analysis.redundancy * 100).toFixed(1)}% of information is redundant. Some questions may be asking similar things.`,
+                    action: 'Review questions with high mutual information and consider removing redundant nodes.'
+                });
+            }
+
+            // Check for unbalanced branches
+            const nodeEntropyValues = Object.values(analysis.nodeEntropy || {});
+            const imbalancedNodes = nodeEntropyValues.filter(n =>
+                n.branchProbabilities.left < 0.2 || n.branchProbabilities.right < 0.2 ||
+                n.branchProbabilities.left > 0.8 || n.branchProbabilities.right > 0.8
+            );
+
+            if (imbalancedNodes.length > 0) {
+                recommendations.push({
+                    priority: 'medium',
+                    title: `${imbalancedNodes.length} Imbalanced Decision Node(s)`,
+                    description: 'Some nodes have very uneven branching (>80% going one direction).',
+                    action: 'Adjust thresholds or rephrase questions to create more balanced splits.'
+                });
+            }
+
+            // Check tree balance
+            if (analysis.treeComplexity && analysis.treeComplexity.balanceScore < 0.5) {
+                recommendations.push({
+                    priority: 'medium',
+                    title: 'Unbalanced Tree Structure',
+                    description: `Tree balance score is ${(analysis.treeComplexity.balanceScore * 100).toFixed(1)}%. Tree may be lopsided.`,
+                    action: 'Consider restructuring to create a more balanced tree for better performance.'
+                });
+            }
+
+            // Positive feedback if doing well
+            if (recommendations.length === 0) {
+                recommendations.push({
+                    priority: 'low',
+                    title: '✅ Tree Structure Looks Good!',
+                    description: 'Your tree has good decision efficiency, balanced branching, and low redundancy.',
+                    action: 'Keep monitoring as you collect more data.'
+                });
+            }
+
+            return recommendations;
+        }
+
+        /**
+         * Feature 5: Generate node reordering optimization suggestions
+         * @param {Object} analysis - Shannon analysis data
+         */
+        function renderOptimizationSuggestions(analysis) {
+            const container = document.getElementById('optimization-content');
+            if (!container) return;
+
+            const suggestions = generateOptimizationSuggestions(analysis);
+            let html = '';
+
+            if (suggestions.length === 0) {
+                html = '<p style="color: #999;">No optimization suggestions at this time.</p>';
+            } else {
+                html = '<h4 style="margin-bottom: 15px;">Suggested Node Reordering for Maximum Information Gain:</h4>';
+                html += '<ol style="margin: 0; padding-left: 25px;">';
+
+                suggestions.forEach((suggestion, index) => {
+                    html += `
+                        <li style="margin-bottom: 12px; padding: 10px; background: #f0f8ff; border-radius: 5px;">
+                            <div style="font-weight: bold; color: #2c3e50;">${suggestion.question}</div>
+                            <div style="font-size: 13px; color: #7f8c8d; margin-top: 4px;">
+                                Info Gain: ${suggestion.infoGain.toFixed(3)} bits |
+                                Efficiency: ${(suggestion.efficiency * 100).toFixed(1)}% |
+                                Current Position: Layer ${suggestion.currentDepth}
+                            </div>
+                        </li>
+                    `;
+                });
+
+                html += '</ol>';
+                html += '<p style="margin-top: 15px; padding: 10px; background: #fffbf0; border-radius: 5px; font-size: 14px;"><strong>💡 Tip:</strong> Nodes with higher information gain should generally appear earlier in the tree for optimal decision-making efficiency.</p>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        /**
+         * Generate optimization suggestions for node reordering
+         * @param {Object} analysis - Shannon analysis data
+         * @returns {Array<{question: string, infoGain: number, efficiency: number, currentDepth: number}>}
+         */
+        function generateOptimizationSuggestions(analysis) {
+            // Edge case: No information gain data
+            if (!analysis || !analysis.informationGain) return [];
+
+            const infoGainArray = Object.entries(analysis.informationGain).map(([nodeId, data]) => ({
+                nodeId,
+                question: data.question,
+                infoGain: data.gain,
+                efficiency: data.efficiency,
+                currentDepth: 0 // Will be filled if we can determine it
+            }));
+
+            // Sort by information gain (highest first)
+            return infoGainArray.sort((a, b) => b.infoGain - a.infoGain).slice(0, 10);
+        }
+
+        /**
+         * Feature 3: Enhanced JSON export with metadata
+         * @param {Object} analysis - Shannon analysis data
+         */
+        function exportShannonAnalysisEnhanced(analysis) {
+            const enhanced = {
+                metadata: {
+                    exportDate: new Date().toISOString(),
+                    treeId: `tree_${Date.now()}`,
+                    version: '2.0',
+                    nodeCount: treeBuilder.nodes.size,
+                    dataPoints: window.batchResults ? window.batchResults.length : 0
+                },
+                analysis: analysis,
+                recommendations: generateTreeRecommendations(analysis),
+                optimizations: generateOptimizationSuggestions(analysis)
+            };
+
+            const blob = new Blob([JSON.stringify(enhanced, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `shannon-analysis-enhanced-${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        /**
+         * Feature 3: Export as CSV format
+         * @param {Object} analysis - Shannon analysis data
+         */
+        function exportShannonAnalysisCSV(analysis) {
+            // Edge case: No data
+            if (!analysis) {
+                alert('No analysis data to export');
+                return;
+            }
+
+            let csv = 'Shannon Information Theory Analysis - CSV Export\n\n';
+
+            // Summary metrics
+            csv += 'SUMMARY METRICS\n';
+            csv += 'Metric,Value\n';
+            if (analysis.summary) {
+                csv += `Average Node Entropy,${analysis.summary.averageNodeEntropy.toFixed(3)} bits\n`;
+                csv += `Max Node Entropy,${analysis.summary.maxNodeEntropy.toFixed(3)} bits\n`;
+                csv += `Path Diversity,${(analysis.summary.pathDiversity * 100).toFixed(1)}%\n`;
+                csv += `Decision Efficiency,${(analysis.summary.decisionEfficiency * 100).toFixed(1)}%\n`;
+                csv += `Information Redundancy,${(analysis.redundancy * 100).toFixed(1)}%\n`;
+            }
+
+            // Node entropy data
+            csv += '\n\nNODE ENTROPY ANALYSIS\n';
+            csv += 'Question,Entropy (bits),Normalized,Branch Entropy,Left Prob,Right Prob\n';
+            Object.values(analysis.nodeEntropy || {}).forEach(node => {
+                csv += `"${node.question.replace(/"/g, '""')}",${node.entropy.toFixed(3)},${(node.normalizedEntropy * 100).toFixed(1)}%,${node.branchEntropy.toFixed(3)},${(node.branchProbabilities.left * 100).toFixed(1)}%,${(node.branchProbabilities.right * 100).toFixed(1)}%\n`;
+            });
+
+            // Information gain
+            csv += '\n\nINFORMATION GAIN\n';
+            csv += 'Decision Node,Info Gain,Parent Entropy,Child Entropy,Efficiency\n';
+            Object.values(analysis.informationGain || {}).forEach(ig => {
+                csv += `"${ig.question.replace(/"/g, '""')}",${ig.gain.toFixed(3)},${ig.parentEntropy.toFixed(3)},${ig.weightedChildEntropy.toFixed(3)},${(ig.efficiency * 100).toFixed(1)}%\n`;
+            });
+
+            const blob = new Blob([csv], {type: 'text/csv'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `shannon-analysis-${Date.now()}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        /**
+         * Feature 3: Export as Excel-ready TSV format
+         * @param {Object} analysis - Shannon analysis data
+         */
+        function exportShannonAnalysisExcel(analysis) {
+            // Edge case: No data
+            if (!analysis) {
+                alert('No analysis data to export');
+                return;
+            }
+
+            let tsv = 'Shannon Analysis\t\t\t\t\t\n\n';
+
+            // Summary with better Excel formatting
+            tsv += 'SUMMARY METRICS\t\t\t\t\t\n';
+            tsv += 'Metric\tValue\tUnit\t\t\t\n';
+            if (analysis.summary) {
+                tsv += `Average Node Entropy\t${analysis.summary.averageNodeEntropy.toFixed(3)}\tbits\t\t\t\n`;
+                tsv += `Max Node Entropy\t${analysis.summary.maxNodeEntropy.toFixed(3)}\tbits\t\t\t\n`;
+                tsv += `Path Diversity\t${analysis.summary.pathDiversity.toFixed(3)}\tratio\t\t\t\n`;
+                tsv += `Decision Efficiency\t${analysis.summary.decisionEfficiency.toFixed(3)}\tratio\t\t\t\n`;
+                tsv += `Information Redundancy\t${analysis.redundancy.toFixed(3)}\tratio\t\t\t\n`;
+            }
+
+            // Node data
+            tsv += '\n\nNODE ENTROPY ANALYSIS\t\t\t\t\t\n';
+            tsv += 'Question\tEntropy (bits)\tNormalized\tBranch Entropy\tLeft Prob\tRight Prob\n';
+            Object.values(analysis.nodeEntropy || {}).forEach(node => {
+                tsv += `${node.question}\t${node.entropy.toFixed(3)}\t${node.normalizedEntropy.toFixed(3)}\t${node.branchEntropy.toFixed(3)}\t${node.branchProbabilities.left.toFixed(3)}\t${node.branchProbabilities.right.toFixed(3)}\n`;
+            });
+
+            const blob = new Blob([tsv], {type: 'text/tab-separated-values'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `shannon-analysis-excel-${Date.now()}.tsv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        /**
+         * Feature 3: Export as HTML report (PDF-ready)
+         * @param {Object} analysis - Shannon analysis data
+         */
+        function exportShannonAnalysisPDF(analysis) {
+            const recommendations = generateTreeRecommendations(analysis);
+            const optimizations = generateOptimizationSuggestions(analysis);
+
+            const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Shannon Analysis Report - ${new Date().toLocaleDateString()}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; border-bottom: 2px solid #95a5a6; padding-bottom: 5px; }
+        .metric { background: #ecf0f1; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .metric strong { color: #2980b9; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th { background: #3498db; color: white; padding: 10px; text-align: left; }
+        td { padding: 8px; border-bottom: 1px solid #ddd; }
+        tr:hover { background: #f5f5f5; }
+        .recommendation { background: #fff3cd; padding: 12px; margin: 10px 0; border-left: 4px solid #ffc107; }
+        .high-priority { border-left-color: #e74c3c; background: #fee; }
+        @media print { body { margin: 20px; } }
+    </style>
+</head>
+<body>
+    <h1>📊 Shannon Information Theory Analysis Report</h1>
+    <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+    <p><strong>Tree Nodes:</strong> ${treeBuilder.nodes.size}</p>
+    <p><strong>Data Points:</strong> ${window.batchResults ? window.batchResults.length : 0}</p>
+
+    <h2>Summary Metrics</h2>
+    <div class="metric"><strong>Average Node Entropy:</strong> ${analysis.summary.averageNodeEntropy.toFixed(3)} bits</div>
+    <div class="metric"><strong>Path Diversity:</strong> ${(analysis.summary.pathDiversity * 100).toFixed(1)}%</div>
+    <div class="metric"><strong>Decision Efficiency:</strong> ${(analysis.summary.decisionEfficiency * 100).toFixed(1)}%</div>
+    <div class="metric"><strong>Information Redundancy:</strong> ${(analysis.redundancy * 100).toFixed(1)}%</div>
+
+    <h2>💡 Recommendations</h2>
+    ${recommendations.map(rec => `
+        <div class="recommendation ${rec.priority === 'high' ? 'high-priority' : ''}">
+            <strong>${rec.title}</strong><br>
+            ${rec.description}<br>
+            ${rec.action ? `<em>Action: ${rec.action}</em>` : ''}
+        </div>
+    `).join('')}
+
+    <h2>⚡ Optimization Suggestions</h2>
+    <table>
+        <tr><th>Rank</th><th>Question</th><th>Info Gain</th><th>Efficiency</th></tr>
+        ${optimizations.map((opt, i) => `
+            <tr>
+                <td>${i + 1}</td>
+                <td>${opt.question}</td>
+                <td>${opt.infoGain.toFixed(3)} bits</td>
+                <td>${(opt.efficiency * 100).toFixed(1)}%</td>
+            </tr>
+        `).join('')}
+    </table>
+
+    <h2>Node Entropy Analysis</h2>
+    <table>
+        <tr><th>Question</th><th>Entropy</th><th>Normalized</th><th>Left/Right</th></tr>
+        ${Object.values(analysis.nodeEntropy || {}).map(node => `
+            <tr>
+                <td>${node.question}</td>
+                <td>${node.entropy.toFixed(3)} bits</td>
+                <td>${(node.normalizedEntropy * 100).toFixed(1)}%</td>
+                <td>${(node.branchProbabilities.left * 100).toFixed(0)}% / ${(node.branchProbabilities.right * 100).toFixed(0)}%</td>
+            </tr>
+        `).join('')}
+    </table>
+
+    <hr style="margin-top: 40px;">
+    <p style="font-size: 12px; color: #7f8c8d;">Generated by Tree Decision System | Shannon Entropy Analysis Module</p>
+</body>
+</html>
+            `;
+
+            const blob = new Blob([html], {type: 'text/html'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `shannon-analysis-report-${Date.now()}.html`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        /**
+         * Feature 4: Save analysis for comparison
+         */
+        function saveAnalysisForComparison() {
+            if (!window.lastShannonAnalysis) {
+                alert('No analysis available. Please run Shannon analysis first.');
+                return;
+            }
+
+            try {
+                const saved = JSON.parse(localStorage.getItem('shannonComparisons') || '[]');
+                const timestamp = Date.now();
+
+                saved.push({
+                    id: `analysis_${timestamp}`,
+                    timestamp: timestamp,
+                    date: new Date().toLocaleString(),
+                    treeNodes: treeBuilder.nodes.size,
+                    dataPoints: window.batchResults ? window.batchResults.length : 0,
+                    analysis: window.lastShannonAnalysis
+                });
+
+                // Keep only last 10 analyses
+                if (saved.length > 10) saved.shift();
+
+                localStorage.setItem('shannonComparisons', JSON.stringify(saved));
+                alert(`✅ Analysis saved! You now have ${saved.length} saved analysis(es).`);
+            } catch (e) {
+                alert('Error saving analysis: ' + e.message);
+            }
+        }
+
+        /**
+         * Feature 4: Show comparison view
+         */
+        function showComparisonView() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('shannonComparisons') || '[]');
+
+                if (saved.length === 0) {
+                    alert('No saved analyses. Save an analysis first to compare.');
+                    return;
+                }
+
+                const container = document.getElementById('comparison-results');
+                if (!container) return;
+
+                let html = '<h4 style="margin-top: 15px; margin-bottom: 10px;">Saved Analyses:</h4>';
+                html += '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
+                html += '<tr style="background: #f5f5f5;"><th style="padding: 8px; border: 1px solid #ddd;">Date</th><th style="padding: 8px; border: 1px solid #ddd;">Nodes</th><th style="padding: 8px; border: 1px solid #ddd;">Avg Entropy</th><th style="padding: 8px; border: 1px solid #ddd;">Efficiency</th><th style="padding: 8px; border: 1px solid #ddd;">Action</th></tr>';
+
+                saved.forEach((item, index) => {
+                    const analysis = item.analysis;
+                    html += `
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #ddd;">${item.date}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">${item.treeNodes}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">${analysis.summary.averageNodeEntropy.toFixed(3)} bits</td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">${(analysis.summary.decisionEfficiency * 100).toFixed(1)}%</td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">
+                                <button onclick="deleteComparison(${index})" style="padding: 4px 8px; background: #e74c3c; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px;">Delete</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += '</table>';
+                html += '<button onclick="clearAllComparisons()" style="margin-top: 10px; padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer;">Clear All</button>';
+
+                container.innerHTML = html;
+            } catch (e) {
+                alert('Error loading comparisons: ' + e.message);
+            }
+        }
+
+        /**
+         * Delete a specific comparison
+         */
+        function deleteComparison(index) {
+            try {
+                const saved = JSON.parse(localStorage.getItem('shannonComparisons') || '[]');
+                saved.splice(index, 1);
+                localStorage.setItem('shannonComparisons', JSON.stringify(saved));
+                showComparisonView(); // Refresh
+            } catch (e) {
+                alert('Error deleting comparison: ' + e.message);
+            }
+        }
+
+        /**
+         * Clear all comparisons
+         */
+        function clearAllComparisons() {
+            if (confirm('Are you sure you want to delete all saved analyses?')) {
+                localStorage.removeItem('shannonComparisons');
+                document.getElementById('comparison-results').innerHTML = '<p style="color: #999;">All comparisons cleared.</p>';
+            }
+        }
+
+        /**
+         * Calculate tree structural complexity metrics
+         * Analyzes tree shape, depth, branching patterns, and balance
+         * @returns {{structuralEntropy: number, depthComplexity: number, branchingEntropy: number, theoreticalMaxEntropy: number, balanceScore: number}}
+         */
         function calculateTreeComplexity() {
             const complexity = {
                 structuralEntropy: 0,
@@ -8393,17 +9026,26 @@ You can now:
                 }
                 
                 // Theoretical maximum entropy for a balanced binary tree
-                complexity.theoreticalMaxEntropy = Math.log2(Math.pow(2, treeBuilder.layers.length) - 1);
-                
+                // Edge case: Single layer tree (2^1 - 1 = 1) gives log2(1) = 0
+                const maxNodes = Math.pow(2, treeBuilder.layers.length) - 1;
+                complexity.theoreticalMaxEntropy = maxNodes > 1 ? Math.log2(maxNodes) : 0;
+
                 // Balance score - how balanced is the tree (0-1, 1 being perfectly balanced)
                 const actualPaths = countAllPaths(treeBuilder.layers[0]?.nodes[0]);
                 const maxPossiblePaths = Math.pow(2, treeBuilder.layers.length - 1);
-                complexity.balanceScore = actualPaths / maxPossiblePaths;
+                // Edge case: Empty tree or single-layer tree
+                complexity.balanceScore = maxPossiblePaths > 0 ?
+                    actualPaths / maxPossiblePaths : 0;
             }
             
             return complexity;
         }
         
+        /**
+         * Recursively count all paths from a node to leaf nodes
+         * @param {DecisionNode} node - Starting node
+         * @returns {number} Total number of paths to leaves
+         */
         function countAllPaths(node) {
             if (!node) return 0;
             if (!node.left && !node.right) return 1;
@@ -8413,38 +9055,163 @@ You can now:
             return paths;
         }
 
-        // Advanced Tree Generation from Survey Data
+        /**
+         * Analyze survey data to provide generation recommendations
+         * @param {Array<Object>} data - Survey data
+         * @returns {{responses: number, columns: number, avgCorrelation: number, variance: number, recommendation: string, recommended: string}}
+         */
+        function analyzeDataForTreeGeneration(data) {
+            // Edge case: Invalid data
+            if (!data || !Array.isArray(data) || data.length === 0 || !data[0]) {
+                return {
+                    responses: 0,
+                    columns: 0,
+                    avgCorrelation: 0,
+                    variance: 0,
+                    recommendation: 'No data available',
+                    recommended: 'information'
+                };
+            }
+
+            const responses = data.length;
+            const columns = Object.keys(data[0]).filter(key => typeof data[0][key] === 'number');
+            const numColumns = columns.length;
+
+            // Calculate average correlation
+            let totalCorr = 0;
+            let corrCount = 0;
+            for (let i = 0; i < numColumns && i < 10; i++) {
+                for (let j = i + 1; j < numColumns && j < 10; j++) {
+                    const vals1 = data.map(row => row[columns[i]] || 0);
+                    const vals2 = data.map(row => row[columns[j]] || 0);
+                    const corr = calculateCorrelation(vals1, vals2);
+                    if (isFinite(corr)) {
+                        totalCorr += Math.abs(corr);
+                        corrCount++;
+                    }
+                }
+            }
+            const avgCorrelation = corrCount > 0 ? totalCorr / corrCount : 0;
+
+            // Calculate average variance
+            let totalVariance = 0;
+            for (let i = 0; i < Math.min(numColumns, 10); i++) {
+                const vals = data.map(row => row[columns[i]] || 0);
+                totalVariance += calculateVariance(vals);
+            }
+            const variance = numColumns > 0 ? totalVariance / Math.min(numColumns, 10) : 0;
+
+            // Generate recommendation
+            let recommendation = '';
+            let recommended = 'information'; // Default
+
+            if (numColumns < 2) {
+                recommendation = 'Not enough variables. Consider adding more questions.';
+            } else if (responses < 10) {
+                recommendation = 'Limited data. Any algorithm will work, but consider collecting more responses.';
+            } else if (avgCorrelation > 0.6) {
+                recommendation = 'High correlation detected! Correlation MST is ideal for your data.';
+                recommended = 'correlation';
+            } else if (responses > 100 && numColumns > 5) {
+                recommendation = 'Large dataset! Hybrid approach will give best results.';
+                recommended = 'hybrid';
+            } else {
+                recommendation = 'Information Gain Tree is recommended for balanced accuracy and speed.';
+                recommended = 'information';
+            }
+
+            return {
+                responses,
+                columns: numColumns,
+                avgCorrelation,
+                variance,
+                recommendation,
+                recommended
+            };
+        }
+
+        /**
+         * FEATURE 1: Enhanced Tree Generation Wizard
+         * Shows interactive modal with algorithm previews, pros/cons, and data statistics
+         * @param {Array<Object>} data - Survey data to analyze
+         */
         function showTreeGenerationOptions(data) {
             const modal = document.createElement('div');
-            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000; display: flex; align-items: center; justify-content: center;';
-            
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 3000; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 20px;';
+
             const content = document.createElement('div');
-            content.style.cssText = 'background: white; padding: 30px; border-radius: 20px; width: 600px; max-width: 90%; box-shadow: 0 20px 40px rgba(0, 57, 166, 0.3);';
-            
+            content.style.cssText = 'background: white; padding: 40px; border-radius: 20px; width: 900px; max-width: 95%; box-shadow: 0 20px 60px rgba(0, 57, 166, 0.4);';
+
+            // Analyze the data
+            const dataStats = analyzeDataForTreeGeneration(data);
+
             content.innerHTML = `
-                <h2 style="margin-bottom: 20px; background: linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Generate Tree from Data</h2>
-                <p style="color: #666; margin-bottom: 20px;">No tree structure found. Choose a method to automatically generate a tree from your survey data:</p>
+                <h2 style="margin-bottom: 10px; background: linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 28px;">🧙‍♂️ Tree Generation Wizard</h2>
+                <p style="color: #666; margin-bottom: 25px; font-size: 15px;">Choose the best algorithm for your ${dataStats.responses} responses across ${dataStats.columns} variables</p>
+
+                <div style="background: linear-gradient(135deg, #f0f8ff, #e6f2ff); padding: 20px; border-radius: 12px; margin-bottom: 25px; border-left: 4px solid var(--gsu-primary);">
+                    <h3 style="margin: 0 0 12px 0; color: #0039A6; font-size: 16px;">📊 Your Data Summary</h3>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; font-size: 14px;">
+                        <div><strong>Responses:</strong> ${dataStats.responses}</div>
+                        <div><strong>Variables:</strong> ${dataStats.columns}</div>
+                        <div><strong>Avg Correlation:</strong> ${dataStats.avgCorrelation.toFixed(3)}</div>
+                        <div><strong>Data Variance:</strong> ${dataStats.variance > 1 ? 'High' : 'Low'}</div>
+                    </div>
+                    <div style="margin-top: 12px; padding: 10px; background: white; border-radius: 6px; font-size: 13px;">
+                        <strong>💡 Recommendation:</strong> ${dataStats.recommendation}
+                    </div>
+                </div>
+
+                <p style="color: #444; margin-bottom: 20px; font-weight: 500; font-size: 16px;">Select an algorithm:</p>
                 
-                <div style="display: flex; flex-direction: column; gap: 15px; margin: 20px 0;">
-                    <button onclick="generateTreeFromData('correlation')" style="padding: 15px; background: linear-gradient(135deg, var(--gsu-primary), var(--gsu-vibrant)); color: white; border: none; border-radius: 10px; cursor: pointer; text-align: left;">
-                        <strong>Correlation Graph → MST</strong><br>
-                        <small style="opacity: 0.9;">Build minimum spanning tree from correlation matrix (best for related questions)</small>
-                    </button>
-                    
-                    <button onclick="generateTreeFromData('information')" style="padding: 15px; background: linear-gradient(135deg, var(--gsu-vibrant), var(--gsu-light-blue)); color: white; border: none; border-radius: 10px; cursor: pointer; text-align: left;">
-                        <strong>Information Gain Splitting</strong><br>
-                        <small style="opacity: 0.9;">Use Shannon entropy to find optimal decision boundaries (best for predictive trees)</small>
-                    </button>
-                    
-                    <button onclick="generateTreeFromData('clustering')" style="padding: 15px; background: linear-gradient(135deg, var(--gsu-success), #0ec775); color: white; border: none; border-radius: 10px; cursor: pointer; text-align: left;">
-                        <strong>Spectral Clustering</strong><br>
-                        <small style="opacity: 0.9;">Group similar response patterns hierarchically (best for exploratory analysis)</small>
-                    </button>
-                    
-                    <button onclick="generateTreeFromData('hybrid')" style="padding: 15px; background: linear-gradient(135deg, #FF6B6B, #FFE66D); color: white; border: none; border-radius: 10px; cursor: pointer; text-align: left;">
-                        <strong>Hybrid KNN + Graph Theory</strong><br>
-                        <small style="opacity: 0.9;">Combine correlation, information gain, and k-nearest neighbors (most comprehensive)</small>
-                    </button>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0;">
+                    <!-- Algorithm 1 -->
+                    <div onclick="generateTreeFromData('correlation')" style="padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.2s; position: relative;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">📊 Correlation Matrix MST</div>
+                        <div style="font-size: 13px; opacity: 0.95; margin-bottom: 12px;">Builds tree from correlation relationships using Kruskal's algorithm</div>
+                        <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px;">
+                            <div>✅ Best for: Related variables</div>
+                            <div>✅ Fast computation</div>
+                            <div>⚠️ Needs: 2+ variables</div>
+                        </div>
+                        <div style="font-size: 11px; opacity: 0.8;">Complexity: O(n² log n)</div>
+                    </div>
+
+                    <!-- Algorithm 2 -->
+                    <div onclick="generateTreeFromData('information')" style="padding: 20px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">📈 Information Gain Tree ${dataStats.recommended === 'information' ? '⭐' : ''}</div>
+                        <div style="font-size: 13px; opacity: 0.95; margin-bottom: 12px;">Uses Shannon entropy to maximize information gain at each split</div>
+                        <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px;">
+                            <div>✅ Best for: Predictive trees</div>
+                            <div>✅ High accuracy</div>
+                            <div>⚠️ Slower for large data</div>
+                        </div>
+                        <div style="font-size: 11px; opacity: 0.8;">Complexity: O(n² m)</div>
+                    </div>
+
+                    <!-- Algorithm 3 -->
+                    <div onclick="generateTreeFromData('clustering')" style="padding: 20px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">🎯 Spectral Clustering</div>
+                        <div style="font-size: 13px; opacity: 0.95; margin-bottom: 12px;">Groups similar patterns hierarchically for exploration</div>
+                        <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px;">
+                            <div>✅ Best for: Discovery</div>
+                            <div>✅ Finds hidden patterns</div>
+                            <div>⚠️ Requires tuning</div>
+                        </div>
+                        <div style="font-size: 11px; opacity: 0.8;">Complexity: O(n³)</div>
+                    </div>
+
+                    <!-- Algorithm 4 -->
+                    <div onclick="generateTreeFromData('hybrid')" style="padding: 20px; background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+                        <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">🚀 Hybrid Ensemble ${dataStats.recommended === 'hybrid' ? '⭐' : ''}</div>
+                        <div style="font-size: 13px; opacity: 0.95; margin-bottom: 12px;">Combines correlation, info gain, and KNN for best results</div>
+                        <div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px;">
+                            <div>✅ Best for: Maximum accuracy</div>
+                            <div>✅ Most comprehensive</div>
+                            <div>⚠️ Slowest option</div>
+                        </div>
+                        <div style="font-size: 11px; opacity: 0.8;">Complexity: O(n³)</div>
+                    </div>
                 </div>
                 
                 <div style="display: flex; gap: 10px; margin-top: 20px;">
@@ -8518,9 +9285,30 @@ You can now:
             alert(`Tree generated using ${method} method with ${treeBuilder.nodes.size} nodes!`);
         }
 
-        // Method 1: Correlation-based Minimum Spanning Tree
+        /**
+         * Method 1: Correlation-based Minimum Spanning Tree
+         * Builds tree by finding highly correlated questions using Kruskal's MST algorithm
+         * @param {Array<Object>} data - Survey data array
+         */
         function generateCorrelationTree(data) {
+            // Edge case: Empty or invalid data
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                alert('No data available for tree generation');
+                return;
+            }
+            // Edge case: Missing first row
+            if (!data[0]) {
+                alert('Invalid data format');
+                return;
+            }
+
             const columns = Object.keys(data[0]).filter(key => typeof data[0][key] === 'number');
+
+            // Edge case: Not enough numeric columns
+            if (columns.length < 2) {
+                alert('Need at least 2 numeric columns to build a correlation tree');
+                return;
+            }
             
             // Calculate correlation matrix
             const correlations = {};
@@ -8641,9 +9429,30 @@ You can now:
             });
         }
 
-        // Method 2: Information Gain Tree
+        /**
+         * Method 2: Information Gain Tree using Shannon Entropy
+         * Builds tree by maximizing information gain at each split
+         * @param {Array<Object>} data - Survey data array
+         */
         function generateInformationGainTree(data) {
+            // Edge case: Empty or invalid data
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                alert('No data available for tree generation');
+                return;
+            }
+            // Edge case: Missing first row
+            if (!data[0]) {
+                alert('Invalid data format');
+                return;
+            }
+
             const columns = Object.keys(data[0]).filter(key => typeof data[0][key] === 'number');
+
+            // Edge case: Not enough columns
+            if (columns.length === 0) {
+                alert('No numeric columns found in data');
+                return;
+            }
             
             // Recursive function to build tree
             function buildInfoGainNode(remainingCols, dataSubset, depth = 0) {
@@ -8659,7 +9468,10 @@ You can now:
                 for (const col of remainingCols) {
                     const values = dataSubset.map(row => row[col] || 0);
                     const thresholds = [...new Set(values)].sort((a, b) => a - b);
-                    
+
+                    // Edge case: Not enough unique values to split
+                    if (thresholds.length < 2) continue;
+
                     for (let i = 0; i < thresholds.length - 1; i++) {
                         const threshold = (thresholds[i] + thresholds[i + 1]) / 2;
                         const gain = calculateInformationGain(dataSubset, col, threshold);
@@ -8742,12 +9554,18 @@ You can now:
             }
         }
 
-        // Helper functions for tree generation
+        /**
+         * Calculate Pearson correlation coefficient between two arrays
+         * r = Σ((x - x̄)(y - ȳ)) / √(Σ(x - x̄)² · Σ(y - ȳ)²)
+         * @param {number[]} x - First array of values
+         * @param {number[]} y - Second array of values
+         * @returns {number} Correlation coefficient [-1, 1], or 0 if no variance
+         */
         function calculateCorrelation(x, y) {
             const n = x.length;
             const meanX = x.reduce((a, b) => a + b, 0) / n;
             const meanY = y.reduce((a, b) => a + b, 0) / n;
-            
+
             let num = 0, denomX = 0, denomY = 0;
             for (let i = 0; i < n; i++) {
                 const dx = x[i] - meanX;
@@ -8756,26 +9574,65 @@ You can now:
                 denomX += dx * dx;
                 denomY += dy * dy;
             }
-            
+
+            // Edge case: No variance in one or both variables
             return denomX * denomY === 0 ? 0 : num / Math.sqrt(denomX * denomY);
         }
 
+        /**
+         * Calculate median of array values
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Median value, or 0 if array is empty
+         */
         function calculateMedian(values) {
+            // Edge case: Empty array
+            if (!values || values.length === 0) return 0;
+
             const sorted = [...values].sort((a, b) => a - b);
             const mid = Math.floor(sorted.length / 2);
             return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
         }
 
+        /**
+         * Calculate arithmetic mean of array values
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Mean value, or 0 if array is empty
+         */
         function calculateMean(values) {
+            // Edge case: Empty array
+            if (!values || values.length === 0) return 0;
+
             return values.reduce((a, b) => a + b, 0) / values.length;
         }
 
+        /**
+         * Calculate variance of array values (population variance)
+         * @param {number[]} values - Array of numeric values
+         * @returns {number} Variance, or 0 if array is empty or single element
+         */
         function calculateVariance(values) {
+            // Edge case: Empty or single-element array
+            if (!values || values.length === 0) return 0;
+            if (values.length === 1) return 0;
+
             const mean = calculateMean(values);
             return values.reduce((sum, val) => sum + (val - mean) ** 2, 0) / values.length;
         }
 
+        /**
+         * Calculate percentile of array values using linear interpolation
+         * @param {number[]} values - Array of numeric values
+         * @param {number} p - Percentile (0-100)
+         * @returns {number} Percentile value, or 0 if array is empty
+         */
         function calculatePercentile(values, p) {
+            // Edge case: Empty array
+            if (!values || values.length === 0) return 0;
+            // Edge case: Invalid percentile range
+            if (p < 0 || p > 100) return 0;
+            // Edge case: Single element
+            if (values.length === 1) return values[0];
+
             const sorted = [...values].sort((a, b) => a - b);
             const index = (p / 100) * (sorted.length - 1);
             const lower = Math.floor(index);
@@ -8784,8 +9641,18 @@ You can now:
             return sorted[lower] * (1 - weight) + sorted[upper] * weight;
         }
 
+        /**
+         * Calculate information gain from splitting data at a threshold
+         * IG = H(parent) - Σ(weight_i * H(child_i))
+         * Used in decision tree construction to find optimal splits
+         * @param {Array<Object>} data - Dataset to split
+         * @param {string} column - Column name to split on
+         * @param {number} threshold - Split threshold value
+         * @returns {number} Information gain in bits (higher = better split)
+         */
         function calculateInformationGain(data, column, threshold) {
             const total = data.length;
+            // Edge case: Empty dataset
             if (total === 0) return 0;
 
             // Parent entropy
@@ -8800,9 +9667,9 @@ You can now:
             const leftWeight = leftData.length / total;
             const rightWeight = rightData.length / total;
 
-            const leftEntropy = leftData.length > 0 ? 
+            const leftEntropy = leftData.length > 0 ?
                 calculateEntropy(leftData.map(row => row[column] || 0)) : 0;
-            const rightEntropy = rightData.length > 0 ? 
+            const rightEntropy = rightData.length > 0 ?
                 calculateEntropy(rightData.map(row => row[column] || 0)) : 0;
 
             return parentEntropy - (leftWeight * leftEntropy + rightWeight * rightEntropy);
@@ -8819,8 +9686,21 @@ You can now:
             generateInformationGainTree(data);
         }
 
+        /**
+         * Process batch survey data through the decision tree
+         * @param {Array<Object>} data - Array of survey responses
+         */
         function processSurveyDataBatch(data) {
-            if (!data || !Array.isArray(data)) return;
+            // Edge case: Invalid data
+            if (!data || !Array.isArray(data)) {
+                console.warn('processSurveyDataBatch: Invalid data format');
+                return;
+            }
+            // Edge case: Empty data
+            if (data.length === 0) {
+                console.warn('processSurveyDataBatch: No data to process');
+                return;
+            }
             
             window.batchResults = [];
             
@@ -8841,7 +9721,7 @@ You can now:
                 while (currentNode && keyIndex < scoreKeys.length) {
                     // Try to find a matching score in the response
                     let score = null;
-                    
+
                     // First try exact match with node question
                     if (response[currentNode.question] !== undefined) {
                         score = parseFloat(response[currentNode.question]);
@@ -8851,12 +9731,12 @@ You can now:
                         score = parseFloat(response[scoreKeys[keyIndex]]);
                         keyIndex++;
                     }
-                    
-                    // Default to 0 if no score found
-                    if (score === null || isNaN(score)) {
+
+                    // Edge case: Invalid score - ensure it's a valid number
+                    if (score === null || isNaN(score) || !isFinite(score)) {
                         score = 0;
                     }
-                    
+
                     result.path.push({
                         nodeId: currentNode.id,
                         question: currentNode.question,
@@ -8977,8 +9857,17 @@ You can now:
         let animationSpeed = 500;
         let autoSaveInterval = null;
 
+        /**
+         * Export tree visualization as PNG image
+         */
         window.exportVisualizationAsPNG = function() {
             const svg = document.getElementById('tree-svg');
+            // Edge case: SVG element doesn't exist
+            if (!svg) {
+                alert('No visualization found. Please create a tree first.');
+                return;
+            }
+
             const svgData = new XMLSerializer().serializeToString(svg);
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -9007,7 +9896,271 @@ You can now:
         window.exportVisualizationAsPDF = () => alert('PDF export coming soon! Use PNG export for now.');
         window.exportFullReport = () => alert('Full report generation coming soon!');
         window.compareDatasets = () => alert('Dataset comparison coming soon!');
-        window.showAdvancedMetrics = () => alert('Advanced metrics dashboard coming soon!');
+
+        /**
+         * FEATURE 5: Tree Quality Validator
+         * Analyzes tree structure for common issues and provides actionable feedback
+         */
+        window.showAdvancedMetrics = function() {
+            const validationResults = validateTreeQuality();
+            displayTreeValidationModal(validationResults);
+        };
+
+        /**
+         * Validate tree structure and identify issues
+         * @returns {{score: number, issues: Array, warnings: Array, suggestions: Array, stats: Object}}
+         */
+        function validateTreeQuality() {
+            const issues = [];
+            const warnings = [];
+            const suggestions = [];
+            const stats = {
+                totalNodes: treeBuilder.nodes.size,
+                maxDepth: treeBuilder.layers.length,
+                leafNodes: 0,
+                branchNodes: 0,
+                orphanedNodes: 0,
+                circularRefs: 0
+            };
+
+            // Edge case: Empty tree
+            if (treeBuilder.nodes.size === 0) {
+                issues.push({
+                    type: 'CRITICAL',
+                    title: 'Empty Tree',
+                    description: 'No nodes in tree. Create nodes to build your decision tree.',
+                    fix: 'Click "Add Root" or import tree data.'
+                });
+                return { score: 0, issues, warnings, suggestions, stats };
+            }
+
+            // Check 1: Orphaned nodes (nodes not connected to root)
+            const connectedNodes = new Set();
+            function markConnected(node) {
+                if (!node || connectedNodes.has(node.id)) return;
+                connectedNodes.add(node.id);
+                if (node.left) markConnected(node.left);
+                if (node.right) markConnected(node.right);
+            }
+            const root = treeBuilder.layers[0]?.nodes[0];
+            if (root) markConnected(root);
+
+            treeBuilder.nodes.forEach(node => {
+                if (!connectedNodes.has(node.id)) {
+                    stats.orphanedNodes++;
+                    warnings.push({
+                        type: 'WARNING',
+                        title: `Orphaned Node: "${node.question}"`,
+                        description: 'This node is not connected to the tree root.',
+                        fix: 'Delete or reconnect this node to the main tree.'
+                    });
+                }
+            });
+
+            // Check 2: Circular references
+            const visiting = new Set();
+            const visited = new Set();
+            function detectCycle(node) {
+                if (!node) return false;
+                if (visited.has(node.id)) return false;
+                if (visiting.has(node.id)) {
+                    stats.circularRefs++;
+                    return true;
+                }
+
+                visiting.add(node.id);
+                const leftCycle = node.left ? detectCycle(node.left) : false;
+                const rightCycle = node.right ? detectCycle(node.right) : false;
+                visiting.delete(node.id);
+                visited.add(node.id);
+
+                return leftCycle || rightCycle;
+            }
+
+            if (root && detectCycle(root)) {
+                issues.push({
+                    type: 'CRITICAL',
+                    title: 'Circular Reference Detected',
+                    description: 'Tree contains a loop. This will cause infinite traversal.',
+                    fix: 'Remove the circular connection between nodes.'
+                });
+            }
+
+            // Check 3: Leaf vs branch nodes
+            treeBuilder.nodes.forEach(node => {
+                if (!node.left && !node.right) {
+                    stats.leafNodes++;
+                } else {
+                    stats.branchNodes++;
+                }
+            });
+
+            // Check 4: Unbalanced branches
+            if (stats.branchNodes > 0) {
+                let unbalancedCount = 0;
+                treeBuilder.nodes.forEach(node => {
+                    if ((node.left && !node.right) || (!node.left && node.right)) {
+                        unbalancedCount++;
+                    }
+                });
+
+                if (unbalancedCount > stats.branchNodes * 0.5) {
+                    warnings.push({
+                        type: 'WARNING',
+                        title: 'Unbalanced Tree',
+                        description: `${unbalancedCount} nodes have only one branch. This may affect user experience.`,
+                        fix: 'Consider adding branches to create more decision paths.'
+                    });
+                }
+            }
+
+            // Check 5: Excessive depth
+            if (stats.maxDepth > 10) {
+                warnings.push({
+                    type: 'WARNING',
+                    title: 'Deep Tree Structure',
+                    description: `Tree has ${stats.maxDepth} layers. Users may find this tiring.`,
+                    fix: 'Consider consolidating questions or creating multiple smaller trees.'
+                });
+            }
+
+            // Check 6: No leaf nodes
+            if (stats.leafNodes === 0 && stats.totalNodes > 0) {
+                issues.push({
+                    type: 'ERROR',
+                    title: 'No Leaf Nodes',
+                    description: 'Tree has no endpoints. Users cannot complete the survey.',
+                    fix: 'Ensure some nodes do not have children.'
+                });
+            }
+
+            // Suggestions
+            if (stats.totalNodes < 3) {
+                suggestions.push({
+                    type: 'INFO',
+                    title: 'Small Tree',
+                    description: 'Tree has few nodes. Consider adding more questions for better insights.',
+                    fix: 'Add 5-10 nodes for optimal data collection.'
+                });
+            }
+
+            if (stats.leafNodes > stats.totalNodes * 0.7) {
+                suggestions.push({
+                    type: 'INFO',
+                    title: 'Many Endpoints',
+                    description: 'Most nodes are leaf nodes. Tree may be too shallow.',
+                    fix: 'Add branching to create deeper decision paths.'
+                });
+            }
+
+            // Calculate quality score (0-100)
+            let score = 100;
+            score -= issues.length * 30;
+            score -= warnings.length * 10;
+            score -= suggestions.length * 5;
+            score = Math.max(0, Math.min(100, score));
+
+            return { score, issues, warnings, suggestions, stats };
+        }
+
+        /**
+         * Display tree validation results in a modal
+         * @param {{score: number, issues: Array, warnings: Array, suggestions: Array, stats: Object}} results
+         */
+        function displayTreeValidationModal(results) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 5000; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 20px;';
+
+            const content = document.createElement('div');
+            content.style.cssText = 'background: white; padding: 40px; border-radius: 20px; width: 800px; max-width: 95%; max-height: 90vh; overflow-y: auto;';
+
+            const scoreColor = results.score > 80 ? '#27ae60' : results.score > 50 ? '#f39c12' : '#e74c3c';
+
+            let html = `
+                <h2 style="margin-bottom: 10px;">✅ Tree Quality Validator</h2>
+                <p style="color: #666; margin-bottom: 25px;">Comprehensive analysis of your decision tree structure</p>
+
+                <div style="background: linear-gradient(135deg, ${scoreColor}, ${scoreColor}dd); padding: 30px; border-radius: 15px; text-align: center; margin-bottom: 25px; color: white;">
+                    <div style="font-size: 48px; font-weight: bold; margin-bottom: 10px;">${results.score}</div>
+                    <div style="font-size: 18px;">Quality Score / 100</div>
+                </div>
+
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 25px;">
+                    <h3 style="margin: 0 0 15px 0;">📊 Tree Statistics</h3>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                        <div><strong>Total Nodes:</strong> ${results.stats.totalNodes}</div>
+                        <div><strong>Max Depth:</strong> ${results.stats.maxDepth} layers</div>
+                        <div><strong>Leaf Nodes:</strong> ${results.stats.leafNodes}</div>
+                        <div><strong>Branch Nodes:</strong> ${results.stats.branchNodes}</div>
+                        <div><strong>Orphaned:</strong> ${results.stats.orphanedNodes}</div>
+                        <div><strong>Circular Refs:</strong> ${results.stats.circularRefs}</div>
+                    </div>
+                </div>
+            `;
+
+            // Issues
+            if (results.issues.length > 0) {
+                html += '<h3 style="color: #e74c3c; margin-top: 25px;">🔴 Critical Issues</h3>';
+                results.issues.forEach(issue => {
+                    html += `
+                        <div style="background: #fee; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #e74c3c;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">${issue.title}</div>
+                            <div style="font-size: 14px; margin-bottom: 8px;">${issue.description}</div>
+                            <div style="font-size: 13px; color: #c0392b;"><strong>Fix:</strong> ${issue.fix}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            // Warnings
+            if (results.warnings.length > 0) {
+                html += '<h3 style="color: #f39c12; margin-top: 25px;">🟡 Warnings</h3>';
+                results.warnings.forEach(warning => {
+                    html += `
+                        <div style="background: #ffc; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #f39c12;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">${warning.title}</div>
+                            <div style="font-size: 14px; margin-bottom: 8px;">${warning.description}</div>
+                            <div style="font-size: 13px; color: #d68910;"><strong>Fix:</strong> ${warning.fix}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            // Suggestions
+            if (results.suggestions.length > 0) {
+                html += '<h3 style="color: #3498db; margin-top: 25px;">💡 Suggestions</h3>';
+                results.suggestions.forEach(suggestion => {
+                    html += `
+                        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #3498db;">
+                            <div style="font-weight: bold; margin-bottom: 5px;">${suggestion.title}</div>
+                            <div style="font-size: 14px; margin-bottom: 8px;">${suggestion.description}</div>
+                            <div style="font-size: 13px; color: #2980b9;"><strong>Tip:</strong> ${suggestion.fix}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            // All good
+            if (results.issues.length === 0 && results.warnings.length === 0 && results.suggestions.length === 0) {
+                html += `
+                    <div style="background: #d4edda; padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center; border: 2px solid #28a745;">
+                        <div style="font-size: 48px; margin-bottom: 10px;">🎉</div>
+                        <div style="font-size: 20px; font-weight: bold; color: #155724;">Perfect Tree Structure!</div>
+                        <div style="margin-top: 10px; color: #155724;">Your tree has no issues, warnings, or suggested improvements.</div>
+                    </div>
+                `;
+            }
+
+            html += `
+                <div style="margin-top: 25px; text-align: center;">
+                    <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" style="padding: 12px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px;">Close</button>
+                </div>
+            `;
+
+            content.innerHTML = html;
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+        }
 
         window.shareTree = function() {
             const treeData = treeBuilder.exportTreeData();
