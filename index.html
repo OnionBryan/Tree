@@ -8638,34 +8638,1794 @@ You can now:
         const originalSubmitScore = window.submitScore;
         window.submitScore = function() {
             const score = parseFloat(document.getElementById('score-input').value);
-            
+
             if (currentSurveyNode && abTestManager.activeTests.has(currentSurveyNode.id)) {
                 // Get variant assignment for this respondent
                 const respondentId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 const variant = abTestManager.assignVariant(currentSurveyNode.id, respondentId);
-                
+
                 if (variant) {
                     // Use variant threshold instead of original
                     const originalThreshold = currentSurveyNode.threshold;
                     currentSurveyNode.threshold = variant.threshold;
-                    
+
                     // Call original submit
                     originalSubmitScore.call(this);
-                    
+
                     // Record conversion
                     const decision = score >= variant.threshold ? 'right' : 'left';
                     abTestManager.recordConversion(currentSurveyNode.id, variant.name, score, decision);
-                    
+
                     // Restore original threshold
                     currentSurveyNode.threshold = originalThreshold;
-                    
+
                     return;
                 }
             }
-            
+
             // No A/B test, proceed normally
             originalSubmitScore.call(this);
         };
+
+        // ============================================================================
+        // BLOCK 9 PART 2: ADVANCED FUZZY LOGIC SYSTEM
+        // ============================================================================
+
+        /**
+         * Membership Functions for Fuzzy Sets
+         * Defines various shapes for fuzzy membership functions
+         */
+        const MembershipFunctions = {
+            /**
+             * Triangular membership function
+             * @param {number} x - Input value
+             * @param {number} a - Left foot
+             * @param {number} b - Peak
+             * @param {number} c - Right foot
+             * @returns {number} Membership degree [0, 1]
+             */
+            triangular: function(x, a, b, c) {
+                if (x <= a || x >= c) return 0;
+                if (x === b) return 1;
+                if (x < b) return (x - a) / (b - a);
+                return (c - x) / (c - b);
+            },
+
+            /**
+             * Trapezoidal membership function
+             * @param {number} x - Input value
+             * @param {number} a - Left foot
+             * @param {number} b - Left shoulder
+             * @param {number} c - Right shoulder
+             * @param {number} d - Right foot
+             * @returns {number} Membership degree [0, 1]
+             */
+            trapezoidal: function(x, a, b, c, d) {
+                if (x <= a || x >= d) return 0;
+                if (x >= b && x <= c) return 1;
+                if (x < b) return (x - a) / (b - a);
+                return (d - x) / (d - c);
+            },
+
+            /**
+             * Gaussian membership function
+             * @param {number} x - Input value
+             * @param {number} mean - Center of the curve
+             * @param {number} sigma - Standard deviation
+             * @returns {number} Membership degree [0, 1]
+             */
+            gaussian: function(x, mean, sigma) {
+                return Math.exp(-Math.pow(x - mean, 2) / (2 * sigma * sigma));
+            },
+
+            /**
+             * Sigmoid membership function
+             * @param {number} x - Input value
+             * @param {number} a - Slope parameter
+             * @param {number} c - Inflection point
+             * @returns {number} Membership degree [0, 1]
+             */
+            sigmoid: function(x, a, c) {
+                return 1 / (1 + Math.exp(-a * (x - c)));
+            },
+
+            /**
+             * Bell-shaped membership function
+             * @param {number} x - Input value
+             * @param {number} a - Width parameter
+             * @param {number} b - Slope parameter
+             * @param {number} c - Center
+             * @returns {number} Membership degree [0, 1]
+             */
+            bell: function(x, a, b, c) {
+                return 1 / (1 + Math.pow(Math.abs((x - c) / a), 2 * b));
+            }
+        };
+
+        /**
+         * T-Norms (Fuzzy AND operations)
+         * Implements various t-norm operators for fuzzy conjunction
+         */
+        const TNorms = {
+            /**
+             * Minimum t-norm (Gödel)
+             */
+            min: function(a, b) {
+                return Math.min(a, b);
+            },
+
+            /**
+             * Product t-norm (Goguen)
+             */
+            product: function(a, b) {
+                return a * b;
+            },
+
+            /**
+             * Łukasiewicz t-norm
+             */
+            lukasiewicz: function(a, b) {
+                return Math.max(0, a + b - 1);
+            },
+
+            /**
+             * Drastic t-norm
+             */
+            drastic: function(a, b) {
+                if (a === 1) return b;
+                if (b === 1) return a;
+                return 0;
+            },
+
+            /**
+             * Nilpotent minimum t-norm
+             */
+            nilpotent_min: function(a, b) {
+                if (a + b > 1) return Math.min(a, b);
+                return 0;
+            },
+
+            /**
+             * Hamacher product t-norm
+             */
+            hamacher_product: function(a, b) {
+                if (a === 0 && b === 0) return 0;
+                return (a * b) / (a + b - a * b);
+            }
+        };
+
+        /**
+         * S-Norms (Fuzzy OR operations)
+         * Implements various s-norm operators for fuzzy disjunction
+         */
+        const SNorms = {
+            /**
+             * Maximum s-norm (Gödel)
+             */
+            max: function(a, b) {
+                return Math.max(a, b);
+            },
+
+            /**
+             * Probabilistic sum s-norm (Goguen)
+             */
+            probabilistic_sum: function(a, b) {
+                return a + b - a * b;
+            },
+
+            /**
+             * Łukasiewicz s-norm
+             */
+            lukasiewicz: function(a, b) {
+                return Math.min(1, a + b);
+            },
+
+            /**
+             * Drastic s-norm
+             */
+            drastic: function(a, b) {
+                if (a === 0) return b;
+                if (b === 0) return a;
+                return 1;
+            },
+
+            /**
+             * Nilpotent maximum s-norm
+             */
+            nilpotent_max: function(a, b) {
+                if (a + b < 1) return Math.max(a, b);
+                return 1;
+            },
+
+            /**
+             * Hamacher sum s-norm
+             */
+            hamacher_sum: function(a, b) {
+                if (a === 1 && b === 1) return 1;
+                return (a + b - 2 * a * b) / (1 - a * b);
+            }
+        };
+
+        /**
+         * Fuzzy Complement Operations
+         * Implements various fuzzy negation operators
+         */
+        const FuzzyComplements = {
+            /**
+             * Standard complement (1 - a)
+             */
+            standard: function(a) {
+                return 1 - a;
+            },
+
+            /**
+             * Sugeno complement
+             */
+            sugeno: function(a, lambda = 1) {
+                return (1 - a) / (1 + lambda * a);
+            },
+
+            /**
+             * Yager complement
+             */
+            yager: function(a, w = 2) {
+                return Math.pow(1 - Math.pow(a, w), 1 / w);
+            }
+        };
+
+        /**
+         * Fuzzy Implication Operations
+         * Implements various fuzzy implication operators
+         */
+        const FuzzyImplications = {
+            /**
+             * Mamdani implication (minimum)
+             */
+            mamdani: function(a, b) {
+                return Math.min(a, b);
+            },
+
+            /**
+             * Larsen implication (product)
+             */
+            larsen: function(a, b) {
+                return a * b;
+            },
+
+            /**
+             * Gödel implication
+             */
+            godel: function(a, b) {
+                return a <= b ? 1 : b;
+            },
+
+            /**
+             * Łukasiewicz implication
+             */
+            lukasiewicz: function(a, b) {
+                return Math.min(1, 1 - a + b);
+            },
+
+            /**
+             * Reichenbach implication
+             */
+            reichenbach: function(a, b) {
+                return 1 - a + a * b;
+            }
+        };
+
+        /**
+         * Fuzzy Aggregation Methods
+         * For combining multiple fuzzy rule outputs
+         */
+        const FuzzyAggregation = {
+            /**
+             * Maximum aggregation
+             */
+            max: function(values) {
+                return Math.max(...values);
+            },
+
+            /**
+             * Probabilistic sum aggregation
+             */
+            probabilistic_sum: function(values) {
+                return values.reduce((acc, val) => acc + val - acc * val, 0);
+            },
+
+            /**
+             * Sum aggregation (bounded at 1)
+             */
+            sum: function(values) {
+                return Math.min(1, values.reduce((acc, val) => acc + val, 0));
+            }
+        };
+
+        /**
+         * Fuzzy Set Class
+         * Represents a fuzzy set with membership function
+         */
+        class FuzzySet {
+            /**
+             * @param {string} name - Name of the fuzzy set
+             * @param {Function} membershipFunction - Function that calculates membership
+             * @param {Object} params - Parameters for the membership function
+             */
+            constructor(name, membershipFunction, params = {}) {
+                this.name = name;
+                this.membershipFunction = membershipFunction;
+                this.params = params;
+            }
+
+            /**
+             * Calculate membership degree for a value
+             * @param {number} x - Input value
+             * @returns {number} Membership degree [0, 1]
+             */
+            getMembership(x) {
+                return this.membershipFunction(x, ...Object.values(this.params));
+            }
+
+            /**
+             * Get the centroid (center of mass) of the fuzzy set
+             * @param {number} min - Minimum x value
+             * @param {number} max - Maximum x value
+             * @param {number} steps - Number of discretization steps
+             * @returns {number} Centroid value
+             */
+            getCentroid(min, max, steps = 100) {
+                const dx = (max - min) / steps;
+                let numerator = 0;
+                let denominator = 0;
+
+                for (let i = 0; i <= steps; i++) {
+                    const x = min + i * dx;
+                    const membership = this.getMembership(x);
+                    numerator += x * membership;
+                    denominator += membership;
+                }
+
+                return denominator === 0 ? (min + max) / 2 : numerator / denominator;
+            }
+
+            /**
+             * Alpha-cut: Get crisp set for membership >= alpha
+             * @param {number} alpha - Threshold value [0, 1]
+             * @param {number} min - Minimum x value
+             * @param {number} max - Maximum x value
+             * @param {number} steps - Number of discretization steps
+             * @returns {Array} Array of x values where membership >= alpha
+             */
+            alphaCut(alpha, min, max, steps = 100) {
+                const result = [];
+                const dx = (max - min) / steps;
+
+                for (let i = 0; i <= steps; i++) {
+                    const x = min + i * dx;
+                    if (this.getMembership(x) >= alpha) {
+                        result.push(x);
+                    }
+                }
+
+                return result;
+            }
+        }
+
+        /**
+         * Fuzzy Rule Class
+         * Represents an IF-THEN fuzzy rule
+         */
+        class FuzzyRule {
+            /**
+             * @param {Array} antecedents - Array of {variable, fuzzySet} objects
+             * @param {Object} consequent - {variable, fuzzySet} object
+             * @param {string} operator - 'AND' or 'OR' for combining antecedents
+             */
+            constructor(antecedents, consequent, operator = 'AND') {
+                this.antecedents = antecedents;
+                this.consequent = consequent;
+                this.operator = operator;
+            }
+
+            /**
+             * Evaluate the rule given input values
+             * @param {Object} inputs - Map of variable names to values
+             * @returns {number} Rule firing strength [0, 1]
+             */
+            evaluate(inputs) {
+                const antecedentValues = this.antecedents.map(ant => {
+                    const inputValue = inputs[ant.variable];
+                    return ant.fuzzySet.getMembership(inputValue);
+                });
+
+                if (this.operator === 'AND') {
+                    return TNorms.min(...antecedentValues);
+                } else {
+                    return SNorms.max(...antecedentValues);
+                }
+            }
+        }
+
+        /**
+         * Fuzzy Inference System
+         * Complete fuzzy logic controller with Mamdani or Sugeno inference
+         */
+        class FuzzyInferenceSystem {
+            /**
+             * @param {string} type - 'mamdani' or 'sugeno'
+             */
+            constructor(type = 'mamdani') {
+                this.type = type;
+                this.rules = [];
+                this.inputVariables = new Map();
+                this.outputVariables = new Map();
+                this.tNorm = TNorms.min;
+                this.sNorm = SNorms.max;
+                this.implication = FuzzyImplications.mamdani;
+                this.aggregation = FuzzyAggregation.max;
+            }
+
+            /**
+             * Add an input variable with its fuzzy sets
+             * @param {string} name - Variable name
+             * @param {Array} fuzzySets - Array of FuzzySet objects
+             * @param {Array} range - [min, max] for the variable
+             */
+            addInputVariable(name, fuzzySets, range) {
+                this.inputVariables.set(name, {
+                    fuzzySets: fuzzySets,
+                    range: range
+                });
+            }
+
+            /**
+             * Add an output variable with its fuzzy sets
+             * @param {string} name - Variable name
+             * @param {Array} fuzzySets - Array of FuzzySet objects
+             * @param {Array} range - [min, max] for the variable
+             */
+            addOutputVariable(name, fuzzySets, range) {
+                this.outputVariables.set(name, {
+                    fuzzySets: fuzzySets,
+                    range: range
+                });
+            }
+
+            /**
+             * Add a fuzzy rule to the system
+             * @param {FuzzyRule} rule - The fuzzy rule to add
+             */
+            addRule(rule) {
+                this.rules.push(rule);
+            }
+
+            /**
+             * Perform fuzzy inference
+             * @param {Object} inputs - Map of input variable names to crisp values
+             * @returns {Object} Map of output variable names to crisp values
+             */
+            infer(inputs) {
+                const outputs = {};
+
+                // For each output variable
+                this.outputVariables.forEach((outputInfo, outputName) => {
+                    // Evaluate all rules that affect this output
+                    const ruleOutputs = this.rules
+                        .filter(rule => rule.consequent.variable === outputName)
+                        .map(rule => {
+                            const strength = rule.evaluate(inputs);
+                            return {
+                                fuzzySet: rule.consequent.fuzzySet,
+                                strength: strength
+                            };
+                        });
+
+                    if (this.type === 'mamdani') {
+                        // Mamdani defuzzification using centroid method
+                        outputs[outputName] = this.defuzzifyMamdani(
+                            ruleOutputs,
+                            outputInfo.range
+                        );
+                    } else {
+                        // Sugeno defuzzification using weighted average
+                        outputs[outputName] = this.defuzzifySugeno(ruleOutputs);
+                    }
+                });
+
+                return outputs;
+            }
+
+            /**
+             * Mamdani defuzzification using centroid method
+             * @param {Array} ruleOutputs - Array of {fuzzySet, strength} objects
+             * @param {Array} range - [min, max] for the output variable
+             * @returns {number} Crisp output value
+             */
+            defuzzifyMamdani(ruleOutputs, range, steps = 100) {
+                const [min, max] = range;
+                const dx = (max - min) / steps;
+                let numerator = 0;
+                let denominator = 0;
+
+                for (let i = 0; i <= steps; i++) {
+                    const x = min + i * dx;
+
+                    // Aggregate all rule outputs at this point
+                    const membershipValues = ruleOutputs.map(ro => {
+                        const membership = ro.fuzzySet.getMembership(x);
+                        return this.implication(ro.strength, membership);
+                    });
+
+                    const aggregatedMembership = this.aggregation(membershipValues);
+
+                    numerator += x * aggregatedMembership;
+                    denominator += aggregatedMembership;
+                }
+
+                return denominator === 0 ? (min + max) / 2 : numerator / denominator;
+            }
+
+            /**
+             * Sugeno defuzzification using weighted average
+             * @param {Array} ruleOutputs - Array of {fuzzySet, strength} objects
+             * @returns {number} Crisp output value
+             */
+            defuzzifySugeno(ruleOutputs) {
+                let numerator = 0;
+                let denominator = 0;
+
+                ruleOutputs.forEach(ro => {
+                    // For Sugeno, consequent fuzzy sets should have crisp output values
+                    const crispValue = ro.fuzzySet.params.value || 0;
+                    numerator += ro.strength * crispValue;
+                    denominator += ro.strength;
+                });
+
+                return denominator === 0 ? 0 : numerator / denominator;
+            }
+
+            /**
+             * Configure the fuzzy operators
+             * @param {Object} config - Configuration object
+             */
+            configure(config) {
+                if (config.tNorm) this.tNorm = config.tNorm;
+                if (config.sNorm) this.sNorm = config.sNorm;
+                if (config.implication) this.implication = config.implication;
+                if (config.aggregation) this.aggregation = config.aggregation;
+            }
+        }
+
+        /**
+         * Fuzzy Gate Evaluator
+         * Specialized evaluator for fuzzy logic gates in decision trees
+         */
+        class FuzzyGateEvaluator {
+            constructor() {
+                this.tNorm = TNorms.min;
+                this.sNorm = SNorms.max;
+            }
+
+            /**
+             * Evaluate a fuzzy logic gate
+             * @param {string} gateType - Type of fuzzy gate
+             * @param {Array} inputs - Array of input values [0, 1]
+             * @returns {number} Output value [0, 1]
+             */
+            evaluate(gateType, inputs) {
+                switch (gateType) {
+                    case 'fuzzy_and':
+                    case 'fuzzy_min':
+                        return inputs.reduce((a, b) => this.tNorm(a, b));
+
+                    case 'fuzzy_or':
+                    case 'fuzzy_max':
+                        return inputs.reduce((a, b) => this.sNorm(a, b));
+
+                    case 'fuzzy_product':
+                        return inputs.reduce((a, b) => TNorms.product(a, b), 1);
+
+                    case 'fuzzy_sum':
+                        return inputs.reduce((a, b) => SNorms.probabilistic_sum(a, b), 0);
+
+                    case 'fuzzy_average':
+                        return inputs.reduce((a, b) => a + b, 0) / inputs.length;
+
+                    case 'fuzzy_weighted_average':
+                        // Assumes inputs come with weights as [value, weight] pairs
+                        let sum = 0;
+                        let weightSum = 0;
+                        inputs.forEach(([value, weight]) => {
+                            sum += value * weight;
+                            weightSum += weight;
+                        });
+                        return weightSum === 0 ? 0 : sum / weightSum;
+
+                    case 'fuzzy_not':
+                        return FuzzyComplements.standard(inputs[0]);
+
+                    case 'fuzzy_xor':
+                        // Fuzzy XOR: max(min(a, 1-b), min(1-a, b))
+                        const a = inputs[0];
+                        const b = inputs[1];
+                        return Math.max(
+                            Math.min(a, 1 - b),
+                            Math.min(1 - a, b)
+                        );
+
+                    case 'fuzzy_implies':
+                        return FuzzyImplications.lukasiewicz(inputs[0], inputs[1]);
+
+                    default:
+                        return inputs[0] || 0;
+                }
+            }
+
+            /**
+             * Set the t-norm operator
+             * @param {string} type - T-norm type
+             */
+            setTNorm(type) {
+                this.tNorm = TNorms[type] || TNorms.min;
+            }
+
+            /**
+             * Set the s-norm operator
+             * @param {string} type - S-norm type
+             */
+            setSNorm(type) {
+                this.sNorm = SNorms[type] || SNorms.max;
+            }
+        }
+
+        // Initialize global fuzzy gate evaluator
+        window.fuzzyGateEvaluator = new FuzzyGateEvaluator();
+
+        // ============================================================================
+        // BLOCK 9 PART 2: COMPLETE LOGIC GATES SYSTEM
+        // ============================================================================
+
+        /**
+         * Boolean Logic Gates
+         * Implements standard two-valued (binary) logic gates
+         */
+        const LogicGates = {
+            /**
+             * AND gate - returns true if all inputs are true
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} AND result
+             */
+            AND: function(inputs) {
+                return inputs.every(x => x);
+            },
+
+            /**
+             * OR gate - returns true if any input is true
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} OR result
+             */
+            OR: function(inputs) {
+                return inputs.some(x => x);
+            },
+
+            /**
+             * NOT gate - returns logical negation
+             * @param {boolean} input - Boolean value
+             * @returns {boolean} NOT result
+             */
+            NOT: function(input) {
+                return !input;
+            },
+
+            /**
+             * NAND gate - NOT AND
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} NAND result
+             */
+            NAND: function(inputs) {
+                return !LogicGates.AND(inputs);
+            },
+
+            /**
+             * NOR gate - NOT OR
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} NOR result
+             */
+            NOR: function(inputs) {
+                return !LogicGates.OR(inputs);
+            },
+
+            /**
+             * XOR gate - exclusive OR (true if odd number of inputs are true)
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} XOR result
+             */
+            XOR: function(inputs) {
+                return inputs.filter(x => x).length % 2 === 1;
+            },
+
+            /**
+             * XNOR gate - NOT XOR (equivalence)
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} XNOR result
+             */
+            XNOR: function(inputs) {
+                return !LogicGates.XOR(inputs);
+            },
+
+            /**
+             * IMPLY gate - material implication (A → B = ¬A ∨ B)
+             * @param {boolean} a - Antecedent
+             * @param {boolean} b - Consequent
+             * @returns {boolean} IMPLY result
+             */
+            IMPLY: function(a, b) {
+                return !a || b;
+            },
+
+            /**
+             * IFF gate - if and only if (biconditional)
+             * @param {boolean} a - First input
+             * @param {boolean} b - Second input
+             * @returns {boolean} IFF result
+             */
+            IFF: function(a, b) {
+                return a === b;
+            },
+
+            /**
+             * BUFFER gate - identity function
+             * @param {boolean} input - Boolean value
+             * @returns {boolean} Same as input
+             */
+            BUFFER: function(input) {
+                return input;
+            }
+        };
+
+        /**
+         * Threshold Logic Gates
+         * Outputs true if number of true inputs meets threshold
+         */
+        const ThresholdGates = {
+            /**
+             * Threshold gate - outputs true if at least k inputs are true
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @param {number} threshold - Minimum number of true inputs
+             * @returns {boolean} Threshold result
+             */
+            threshold: function(inputs, threshold) {
+                const trueCount = inputs.filter(x => x).length;
+                return trueCount >= threshold;
+            },
+
+            /**
+             * Majority gate - outputs true if more than half inputs are true
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} Majority result
+             */
+            majority: function(inputs) {
+                return ThresholdGates.threshold(inputs, Math.ceil(inputs.length / 2));
+            },
+
+            /**
+             * Exactly-k gate - outputs true if exactly k inputs are true
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @param {number} k - Exact number of true inputs required
+             * @returns {boolean} Exactly-k result
+             */
+            exactly_k: function(inputs, k) {
+                return inputs.filter(x => x).length === k;
+            },
+
+            /**
+             * At-most-k gate - outputs true if at most k inputs are true
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @param {number} k - Maximum number of true inputs
+             * @returns {boolean} At-most-k result
+             */
+            at_most_k: function(inputs, k) {
+                return inputs.filter(x => x).length <= k;
+            },
+
+            /**
+             * Odd-parity gate - outputs true if odd number of inputs are true
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} Odd-parity result
+             */
+            odd_parity: function(inputs) {
+                return inputs.filter(x => x).length % 2 === 1;
+            },
+
+            /**
+             * Even-parity gate - outputs true if even number of inputs are true
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} Even-parity result
+             */
+            even_parity: function(inputs) {
+                return inputs.filter(x => x).length % 2 === 0;
+            }
+        };
+
+        /**
+         * Multi-Valued Logic Gates
+         * Supports ternary (3-valued), quaternary (4-valued), and n-valued logic
+         */
+        const MultiValuedGates = {
+            /**
+             * Ternary logic values: 0 (false), 0.5 (unknown), 1 (true)
+             */
+
+            /**
+             * Ternary AND - minimum of inputs
+             * @param {Array<number>} inputs - Array of ternary values [0, 0.5, 1]
+             * @returns {number} Ternary AND result
+             */
+            ternary_AND: function(inputs) {
+                return Math.min(...inputs);
+            },
+
+            /**
+             * Ternary OR - maximum of inputs
+             * @param {Array<number>} inputs - Array of ternary values [0, 0.5, 1]
+             * @returns {number} Ternary OR result
+             */
+            ternary_OR: function(inputs) {
+                return Math.max(...inputs);
+            },
+
+            /**
+             * Ternary NOT - 1 - x
+             * @param {number} input - Ternary value [0, 0.5, 1]
+             * @returns {number} Ternary NOT result
+             */
+            ternary_NOT: function(input) {
+                return 1 - input;
+            },
+
+            /**
+             * Łukasiewicz ternary implication
+             * @param {number} a - Ternary value [0, 0.5, 1]
+             * @param {number} b - Ternary value [0, 0.5, 1]
+             * @returns {number} Ternary implication result
+             */
+            ternary_IMPLY: function(a, b) {
+                return Math.min(1, 1 - a + b);
+            },
+
+            /**
+             * Quaternary logic values: 0, 0.33, 0.67, 1
+             */
+
+            /**
+             * Quaternary AND - minimum of inputs
+             * @param {Array<number>} inputs - Array of quaternary values
+             * @returns {number} Quaternary AND result
+             */
+            quaternary_AND: function(inputs) {
+                return Math.min(...inputs);
+            },
+
+            /**
+             * Quaternary OR - maximum of inputs
+             * @param {Array<number>} inputs - Array of quaternary values
+             * @returns {number} Quaternary OR result
+             */
+            quaternary_OR: function(inputs) {
+                return Math.max(...inputs);
+            },
+
+            /**
+             * Quaternary NOT - 1 - x
+             * @param {number} input - Quaternary value
+             * @returns {number} Quaternary NOT result
+             */
+            quaternary_NOT: function(input) {
+                return 1 - input;
+            },
+
+            /**
+             * N-valued logic AND (generalized minimum)
+             * @param {Array<number>} inputs - Array of n-valued logic values [0, 1]
+             * @returns {number} N-valued AND result
+             */
+            nvalued_AND: function(inputs) {
+                return Math.min(...inputs);
+            },
+
+            /**
+             * N-valued logic OR (generalized maximum)
+             * @param {Array<number>} inputs - Array of n-valued logic values [0, 1]
+             * @returns {number} N-valued OR result
+             */
+            nvalued_OR: function(inputs) {
+                return Math.max(...inputs);
+            },
+
+            /**
+             * N-valued logic NOT (generalized complement)
+             * @param {number} input - N-valued logic value [0, 1]
+             * @returns {number} N-valued NOT result
+             */
+            nvalued_NOT: function(input) {
+                return 1 - input;
+            },
+
+            /**
+             * Discretize continuous value to n-valued logic
+             * @param {number} value - Continuous value [0, 1]
+             * @param {number} n - Number of discrete levels
+             * @returns {number} Discretized value
+             */
+            discretize: function(value, n) {
+                const step = 1 / (n - 1);
+                return Math.round(value / step) * step;
+            }
+        };
+
+        /**
+         * Special Logic Gates
+         * Advanced and specialized gate implementations
+         */
+        const SpecialGates = {
+            /**
+             * Probabilistic gate - outputs true with probability based on inputs
+             * @param {Array<number>} inputs - Array of probability values [0, 1]
+             * @param {string} mode - 'independent' or 'dependent'
+             * @returns {boolean} Probabilistic result
+             */
+            probabilistic: function(inputs, mode = 'independent') {
+                if (mode === 'independent') {
+                    // Probability that at least one input is true
+                    const probAllFalse = inputs.reduce((acc, p) => acc * (1 - p), 1);
+                    const probAtLeastOneTrue = 1 - probAllFalse;
+                    return Math.random() < probAtLeastOneTrue;
+                } else {
+                    // Average probability
+                    const avgProb = inputs.reduce((a, b) => a + b, 0) / inputs.length;
+                    return Math.random() < avgProb;
+                }
+            },
+
+            /**
+             * Weighted threshold gate
+             * @param {Array<Object>} inputs - Array of {value: boolean, weight: number}
+             * @param {number} threshold - Threshold for weighted sum
+             * @returns {boolean} Weighted threshold result
+             */
+            weighted_threshold: function(inputs, threshold) {
+                const weightedSum = inputs.reduce((sum, input) => {
+                    return sum + (input.value ? input.weight : 0);
+                }, 0);
+                return weightedSum >= threshold;
+            },
+
+            /**
+             * Temporal gate - considers input history
+             * @param {Array<boolean>} currentInputs - Current input values
+             * @param {Array<Array<boolean>>} history - Previous input states
+             * @param {string} mode - 'always', 'eventually', 'until'
+             * @returns {boolean} Temporal logic result
+             */
+            temporal: function(currentInputs, history = [], mode = 'always') {
+                const allStates = [...history, currentInputs];
+
+                switch (mode) {
+                    case 'always':
+                        // True if inputs have always been true
+                        return allStates.every(state => state.every(x => x));
+
+                    case 'eventually':
+                        // True if inputs were true at least once
+                        return allStates.some(state => state.every(x => x));
+
+                    case 'until':
+                        // True until condition becomes false
+                        for (let i = 0; i < allStates.length; i++) {
+                            if (!allStates[i].every(x => x)) {
+                                return i === allStates.length - 1;
+                            }
+                        }
+                        return true;
+
+                    default:
+                        return currentInputs.every(x => x);
+                }
+            },
+
+            /**
+             * Adaptive gate - changes behavior based on input patterns
+             * @param {Array<boolean>} inputs - Current input values
+             * @param {Object} state - Internal state object
+             * @returns {boolean} Adaptive result
+             */
+            adaptive: function(inputs, state = {}) {
+                state.callCount = (state.callCount || 0) + 1;
+                state.trueCount = (state.trueCount || 0) + inputs.filter(x => x).length;
+
+                // Adapt threshold based on historical true ratio
+                const historicalTrueRatio = state.trueCount / (state.callCount * inputs.length);
+                const adaptiveThreshold = Math.ceil(inputs.length * historicalTrueRatio);
+
+                return inputs.filter(x => x).length >= adaptiveThreshold;
+            },
+
+            /**
+             * Consensus gate - requires supermajority
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @param {number} ratio - Required ratio of true inputs (default 2/3)
+             * @returns {boolean} Consensus result
+             */
+            consensus: function(inputs, ratio = 2/3) {
+                const trueCount = inputs.filter(x => x).length;
+                return trueCount >= Math.ceil(inputs.length * ratio);
+            },
+
+            /**
+             * Mutex gate - exclusive execution (only one input can be true)
+             * @param {Array<boolean>} inputs - Array of boolean values
+             * @returns {boolean} True if exactly one input is true
+             */
+            mutex: function(inputs) {
+                return inputs.filter(x => x).length === 1;
+            }
+        };
+
+        /**
+         * Gate Evaluator
+         * Unified interface for evaluating all types of logic gates
+         */
+        class GateEvaluator {
+            constructor() {
+                this.state = new Map(); // For stateful gates
+                this.history = new Map(); // For temporal gates
+            }
+
+            /**
+             * Evaluate a logic gate
+             * @param {string} gateType - Type of gate to evaluate
+             * @param {Array} inputs - Input values
+             * @param {Object} params - Additional parameters
+             * @returns {*} Gate output
+             */
+            evaluate(gateType, inputs, params = {}) {
+                // Boolean gates
+                if (LogicGates[gateType]) {
+                    if (gateType === 'NOT' || gateType === 'BUFFER') {
+                        return LogicGates[gateType](inputs[0]);
+                    } else if (gateType === 'IMPLY' || gateType === 'IFF') {
+                        return LogicGates[gateType](inputs[0], inputs[1]);
+                    } else {
+                        return LogicGates[gateType](inputs);
+                    }
+                }
+
+                // Threshold gates
+                if (ThresholdGates[gateType]) {
+                    if (gateType === 'threshold') {
+                        return ThresholdGates.threshold(inputs, params.threshold || 1);
+                    } else if (gateType === 'exactly_k' || gateType === 'at_most_k') {
+                        return ThresholdGates[gateType](inputs, params.k || 1);
+                    } else {
+                        return ThresholdGates[gateType](inputs);
+                    }
+                }
+
+                // Multi-valued gates
+                if (MultiValuedGates[gateType]) {
+                    if (gateType.includes('NOT')) {
+                        return MultiValuedGates[gateType](inputs[0]);
+                    } else if (gateType === 'ternary_IMPLY') {
+                        return MultiValuedGates[gateType](inputs[0], inputs[1]);
+                    } else if (gateType === 'discretize') {
+                        return MultiValuedGates.discretize(inputs[0], params.n || 3);
+                    } else {
+                        return MultiValuedGates[gateType](inputs);
+                    }
+                }
+
+                // Special gates
+                if (SpecialGates[gateType]) {
+                    switch (gateType) {
+                        case 'probabilistic':
+                            return SpecialGates.probabilistic(inputs, params.mode || 'independent');
+
+                        case 'weighted_threshold':
+                            return SpecialGates.weighted_threshold(inputs, params.threshold || 0);
+
+                        case 'temporal':
+                            const nodeId = params.nodeId || 'default';
+                            const history = this.history.get(nodeId) || [];
+                            const result = SpecialGates.temporal(inputs, history, params.mode || 'always');
+                            history.push([...inputs]);
+                            if (history.length > 10) history.shift(); // Keep last 10 states
+                            this.history.set(nodeId, history);
+                            return result;
+
+                        case 'adaptive':
+                            const stateId = params.nodeId || 'default';
+                            const state = this.state.get(stateId) || {};
+                            const adaptiveResult = SpecialGates.adaptive(inputs, state);
+                            this.state.set(stateId, state);
+                            return adaptiveResult;
+
+                        case 'consensus':
+                            return SpecialGates.consensus(inputs, params.ratio || 2/3);
+
+                        case 'mutex':
+                            return SpecialGates.mutex(inputs);
+
+                        default:
+                            return SpecialGates[gateType](inputs);
+                    }
+                }
+
+                // Unknown gate type - default to AND
+                console.warn(`Unknown gate type: ${gateType}, defaulting to AND`);
+                return inputs.every(x => x);
+            }
+
+            /**
+             * Batch evaluate multiple gates
+             * @param {Array<Object>} gates - Array of {type, inputs, params} objects
+             * @returns {Array} Array of results
+             */
+            evaluateBatch(gates) {
+                return gates.map(gate => this.evaluate(gate.type, gate.inputs, gate.params));
+            }
+
+            /**
+             * Reset stateful gates
+             * @param {string} nodeId - Optional node ID to reset specific state
+             */
+            reset(nodeId = null) {
+                if (nodeId) {
+                    this.state.delete(nodeId);
+                    this.history.delete(nodeId);
+                } else {
+                    this.state.clear();
+                    this.history.clear();
+                }
+            }
+
+            /**
+             * Get all supported gate types
+             * @returns {Object} Categorized gate types
+             */
+            getSupportedGates() {
+                return {
+                    boolean: Object.keys(LogicGates),
+                    threshold: Object.keys(ThresholdGates),
+                    multiValued: Object.keys(MultiValuedGates),
+                    special: Object.keys(SpecialGates)
+                };
+            }
+        }
+
+        // Initialize global gate evaluator
+        window.gateEvaluator = new GateEvaluator();
+
+        // ============================================================================
+        // BLOCK 9 PART 2: QUESTION TYPES FRAMEWORK
+        // ============================================================================
+
+        /**
+         * Question Factory
+         * Creates and manages various question types for decision trees
+         */
+        class QuestionFactory {
+            constructor() {
+                this.questionTypes = {
+                    'likert': this.createLikertQuestion,
+                    'semantic_differential': this.createSemanticDifferentialQuestion,
+                    'multiple_choice': this.createMultipleChoiceQuestion,
+                    'ranking': this.createRankingQuestion,
+                    'matrix': this.createMatrixQuestion,
+                    'slider': this.createSliderQuestion,
+                    'combo': this.createComboQuestion,
+                    'conditional': this.createConditionalQuestion,
+                    'adaptive': this.createAdaptiveQuestion
+                };
+            }
+
+            /**
+             * Create a Likert scale question
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createLikertQuestion(config) {
+                return {
+                    type: 'likert',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    scale: config.scale || 5,
+                    labels: config.labels || {
+                        1: 'Strongly Disagree',
+                        [config.scale || 5]: 'Strongly Agree'
+                    },
+                    required: config.required !== false,
+                    reverse: config.reverse || false,
+                    validate: function(response) {
+                        const value = parseInt(response);
+                        return value >= 1 && value <= this.scale;
+                    },
+                    score: function(response) {
+                        let value = parseInt(response);
+                        return this.reverse ? (this.scale + 1 - value) : value;
+                    }
+                };
+            }
+
+            /**
+             * Create a semantic differential question
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createSemanticDifferentialQuestion(config) {
+                return {
+                    type: 'semantic_differential',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    leftPole: config.leftPole || 'Negative',
+                    rightPole: config.rightPole || 'Positive',
+                    scale: config.scale || 7,
+                    required: config.required !== false,
+                    validate: function(response) {
+                        const value = parseInt(response);
+                        return value >= 1 && value <= this.scale;
+                    },
+                    score: function(response) {
+                        return parseInt(response);
+                    },
+                    render: function() {
+                        let html = `<div class="semantic-differential">`;
+                        html += `<p>${this.question}</p>`;
+                        html += `<div style="display: flex; justify-content: space-between; margin: 20px 0;">`;
+                        html += `<span style="font-weight: bold;">${this.leftPole}</span>`;
+                        html += `<span style="font-weight: bold;">${this.rightPole}</span>`;
+                        html += `</div>`;
+                        html += `<div style="display: flex; justify-content: space-between;">`;
+                        for (let i = 1; i <= this.scale; i++) {
+                            html += `<label><input type="radio" name="${this.id}" value="${i}"> ${i}</label>`;
+                        }
+                        html += `</div></div>`;
+                        return html;
+                    }
+                };
+            }
+
+            /**
+             * Create a multiple choice question
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createMultipleChoiceQuestion(config) {
+                return {
+                    type: 'multiple_choice',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    options: config.options || [],
+                    allowMultiple: config.allowMultiple || false,
+                    required: config.required !== false,
+                    optionScores: config.optionScores || {},
+                    validate: function(response) {
+                        if (this.allowMultiple) {
+                            return Array.isArray(response) && response.length > 0;
+                        } else {
+                            return this.options.includes(response);
+                        }
+                    },
+                    score: function(response) {
+                        if (this.allowMultiple) {
+                            return response.reduce((sum, opt) => {
+                                return sum + (this.optionScores[opt] || 0);
+                            }, 0);
+                        } else {
+                            return this.optionScores[response] || 0;
+                        }
+                    }
+                };
+            }
+
+            /**
+             * Create a ranking question
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createRankingQuestion(config) {
+                return {
+                    type: 'ranking',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    items: config.items || [],
+                    required: config.required !== false,
+                    validate: function(response) {
+                        // Response should be an array with all items in order
+                        if (!Array.isArray(response)) return false;
+                        if (response.length !== this.items.length) return false;
+                        // Check all items are present
+                        return this.items.every(item => response.includes(item));
+                    },
+                    score: function(response) {
+                        // Calculate Spearman's rank correlation or custom scoring
+                        let score = 0;
+                        response.forEach((item, index) => {
+                            // Higher rank (lower index) = higher score
+                            score += (this.items.length - index) * (this.itemWeights?.[item] || 1);
+                        });
+                        return score;
+                    }
+                };
+            }
+
+            /**
+             * Create a matrix question
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createMatrixQuestion(config) {
+                return {
+                    type: 'matrix',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    rows: config.rows || [],
+                    columns: config.columns || [],
+                    required: config.required !== false,
+                    validate: function(response) {
+                        // Response should be an object with all rows answered
+                        if (typeof response !== 'object') return false;
+                        return this.rows.every(row => response[row] !== undefined);
+                    },
+                    score: function(response) {
+                        let totalScore = 0;
+                        this.rows.forEach(row => {
+                            const columnIndex = this.columns.indexOf(response[row]);
+                            totalScore += columnIndex + 1;
+                        });
+                        return totalScore;
+                    },
+                    render: function() {
+                        let html = `<div class="matrix-question">`;
+                        html += `<p>${this.question}</p>`;
+                        html += `<table style="width: 100%; border-collapse: collapse;">`;
+                        html += `<thead><tr><th></th>`;
+                        this.columns.forEach(col => {
+                            html += `<th>${col}</th>`;
+                        });
+                        html += `</tr></thead><tbody>`;
+                        this.rows.forEach(row => {
+                            html += `<tr><td>${row}</td>`;
+                            this.columns.forEach((col, idx) => {
+                                html += `<td><input type="radio" name="${this.id}_${row}" value="${col}"></td>`;
+                            });
+                            html += `</tr>`;
+                        });
+                        html += `</tbody></table></div>`;
+                        return html;
+                    }
+                };
+            }
+
+            /**
+             * Create a slider question
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createSliderQuestion(config) {
+                return {
+                    type: 'slider',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    min: config.min || 0,
+                    max: config.max || 100,
+                    step: config.step || 1,
+                    default: config.default || (config.min + config.max) / 2,
+                    labels: config.labels || {},
+                    required: config.required !== false,
+                    validate: function(response) {
+                        const value = parseFloat(response);
+                        return value >= this.min && value <= this.max;
+                    },
+                    score: function(response) {
+                        return parseFloat(response);
+                    },
+                    render: function() {
+                        let html = `<div class="slider-question">`;
+                        html += `<p>${this.question}</p>`;
+                        html += `<input type="range" id="${this.id}" min="${this.min}" max="${this.max}" step="${this.step}" value="${this.default}" `;
+                        html += `oninput="document.getElementById('${this.id}_value').textContent = this.value">`;
+                        html += `<div style="display: flex; justify-content: space-between;">`;
+                        html += `<span>${this.labels[this.min] || this.min}</span>`;
+                        html += `<span id="${this.id}_value">${this.default}</span>`;
+                        html += `<span>${this.labels[this.max] || this.max}</span>`;
+                        html += `</div></div>`;
+                        return html;
+                    }
+                };
+            }
+
+            /**
+             * Create a combo question (multiple question types combined)
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createComboQuestion(config) {
+                return {
+                    type: 'combo',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    subQuestions: config.subQuestions || [],
+                    required: config.required !== false,
+                    validate: function(response) {
+                        // Response should be an object with all sub-questions answered
+                        if (typeof response !== 'object') return false;
+                        return this.subQuestions.every(sq => {
+                            return sq.validate(response[sq.id]);
+                        });
+                    },
+                    score: function(response) {
+                        return this.subQuestions.reduce((total, sq) => {
+                            return total + (sq.score(response[sq.id]) * (sq.weight || 1));
+                        }, 0);
+                    }
+                };
+            }
+
+            /**
+             * Create a conditional question (shows/hides based on previous answers)
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createConditionalQuestion(config) {
+                return {
+                    type: 'conditional',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    baseQuestion: config.baseQuestion,
+                    condition: config.condition, // Function that returns true/false
+                    dependsOn: config.dependsOn, // ID of question this depends on
+                    required: config.required !== false,
+                    validate: function(response, allResponses) {
+                        // Only validate if condition is met
+                        if (!this.condition(allResponses[this.dependsOn])) {
+                            return true; // Skip validation if condition not met
+                        }
+                        return this.baseQuestion.validate(response);
+                    },
+                    score: function(response, allResponses) {
+                        if (!this.condition(allResponses[this.dependsOn])) {
+                            return 0;
+                        }
+                        return this.baseQuestion.score(response);
+                    },
+                    shouldShow: function(allResponses) {
+                        return this.condition(allResponses[this.dependsOn]);
+                    }
+                };
+            }
+
+            /**
+             * Create an adaptive question (changes based on previous responses)
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            createAdaptiveQuestion(config) {
+                return {
+                    type: 'adaptive',
+                    id: config.id || generateUUID(),
+                    question: config.question,
+                    adaptFunction: config.adaptFunction, // Function that modifies question based on history
+                    responseHistory: [],
+                    required: config.required !== false,
+                    validate: function(response) {
+                        // Validation depends on current adapted state
+                        const adapted = this.adaptFunction(this.responseHistory);
+                        return adapted.validate ? adapted.validate(response) : true;
+                    },
+                    score: function(response) {
+                        this.responseHistory.push(response);
+                        const adapted = this.adaptFunction(this.responseHistory);
+                        return adapted.score ? adapted.score(response) : parseFloat(response) || 0;
+                    },
+                    getAdapted: function() {
+                        return this.adaptFunction(this.responseHistory);
+                    }
+                };
+            }
+
+            /**
+             * Create a question of specified type
+             * @param {string} type - Question type
+             * @param {Object} config - Question configuration
+             * @returns {Object} Question object
+             */
+            create(type, config) {
+                const creator = this.questionTypes[type];
+                if (!creator) {
+                    console.warn(`Unknown question type: ${type}, defaulting to likert`);
+                    return this.createLikertQuestion(config);
+                }
+                return creator.call(this, config);
+            }
+
+            /**
+             * Get available question types
+             * @returns {Array} Array of question type names
+             */
+            getAvailableTypes() {
+                return Object.keys(this.questionTypes);
+            }
+        }
+
+        /**
+         * Response Validator
+         * Validates and processes survey responses
+         */
+        class ResponseValidator {
+            constructor() {
+                this.validationRules = new Map();
+                this.customValidators = new Map();
+            }
+
+            /**
+             * Add a validation rule for a question
+             * @param {string} questionId - Question identifier
+             * @param {Function} validator - Validation function
+             */
+            addRule(questionId, validator) {
+                this.validationRules.set(questionId, validator);
+            }
+
+            /**
+             * Add a custom validator
+             * @param {string} name - Validator name
+             * @param {Function} validator - Validation function
+             */
+            addCustomValidator(name, validator) {
+                this.customValidators.set(name, validator);
+            }
+
+            /**
+             * Validate a single response
+             * @param {string} questionId - Question identifier
+             * @param {*} response - Response value
+             * @param {Object} question - Question object
+             * @returns {Object} Validation result {valid: boolean, errors: Array}
+             */
+            validateResponse(questionId, response, question) {
+                const errors = [];
+
+                // Check required
+                if (question.required && (response === null || response === undefined || response === '')) {
+                    errors.push('This question is required');
+                    return { valid: false, errors };
+                }
+
+                // Check question's own validation
+                if (question.validate && !question.validate(response)) {
+                    errors.push('Invalid response format');
+                }
+
+                // Check custom validation rule
+                const customRule = this.validationRules.get(questionId);
+                if (customRule && !customRule(response)) {
+                    errors.push('Response does not meet validation criteria');
+                }
+
+                return {
+                    valid: errors.length === 0,
+                    errors: errors
+                };
+            }
+
+            /**
+             * Validate all responses
+             * @param {Object} responses - Map of question IDs to responses
+             * @param {Array} questions - Array of question objects
+             * @returns {Object} Validation result {valid: boolean, errors: Object}
+             */
+            validateAll(responses, questions) {
+                const allErrors = {};
+                let isValid = true;
+
+                questions.forEach(question => {
+                    const response = responses[question.id];
+                    const result = this.validateResponse(question.id, response, question);
+
+                    if (!result.valid) {
+                        isValid = false;
+                        allErrors[question.id] = result.errors;
+                    }
+                });
+
+                return {
+                    valid: isValid,
+                    errors: allErrors
+                };
+            }
+
+            /**
+             * Sanitize response value
+             * @param {*} response - Raw response value
+             * @param {string} type - Question type
+             * @returns {*} Sanitized response
+             */
+            sanitize(response, type) {
+                switch (type) {
+                    case 'likert':
+                    case 'slider':
+                        return parseFloat(response);
+
+                    case 'multiple_choice':
+                        if (Array.isArray(response)) {
+                            return response.map(r => String(r).trim());
+                        }
+                        return String(response).trim();
+
+                    case 'ranking':
+                        return Array.isArray(response) ? response : [];
+
+                    case 'matrix':
+                    case 'combo':
+                        return typeof response === 'object' ? response : {};
+
+                    default:
+                        return response;
+                }
+            }
+
+            /**
+             * Calculate completion rate
+             * @param {Object} responses - Map of question IDs to responses
+             * @param {Array} questions - Array of question objects
+             * @returns {number} Completion rate (0-1)
+             */
+            getCompletionRate(responses, questions) {
+                const totalQuestions = questions.length;
+                const answeredQuestions = questions.filter(q => {
+                    const response = responses[q.id];
+                    return response !== null && response !== undefined && response !== '';
+                }).length;
+
+                return totalQuestions === 0 ? 1 : answeredQuestions / totalQuestions;
+            }
+
+            /**
+             * Get response statistics
+             * @param {Object} responses - Map of question IDs to responses
+             * @param {Array} questions - Array of question objects
+             * @returns {Object} Statistics object
+             */
+            getStatistics(responses, questions) {
+                const stats = {
+                    total: questions.length,
+                    answered: 0,
+                    skipped: 0,
+                    completionRate: 0,
+                    averageScore: 0,
+                    totalScore: 0
+                };
+
+                let totalScore = 0;
+                let scorableQuestions = 0;
+
+                questions.forEach(question => {
+                    const response = responses[question.id];
+                    const hasResponse = response !== null && response !== undefined && response !== '';
+
+                    if (hasResponse) {
+                        stats.answered++;
+
+                        // Calculate score if possible
+                        if (question.score) {
+                            try {
+                                const score = question.score(response);
+                                totalScore += score;
+                                scorableQuestions++;
+                            } catch (e) {
+                                console.warn(`Error scoring question ${question.id}:`, e);
+                            }
+                        }
+                    } else {
+                        stats.skipped++;
+                    }
+                });
+
+                stats.completionRate = stats.total === 0 ? 1 : stats.answered / stats.total;
+                stats.totalScore = totalScore;
+                stats.averageScore = scorableQuestions === 0 ? 0 : totalScore / scorableQuestions;
+
+                return stats;
+            }
+
+            /**
+             * Detect response patterns (e.g., straight-lining)
+             * @param {Object} responses - Map of question IDs to responses
+             * @param {Array} questions - Array of question objects
+             * @returns {Object} Pattern detection results
+             */
+            detectPatterns(responses, questions) {
+                const patterns = {
+                    straightLining: false,
+                    speedingDetected: false,
+                    inconsistencies: []
+                };
+
+                // Check for straight-lining (all same responses)
+                const likertResponses = questions
+                    .filter(q => q.type === 'likert' || q.type === 'slider')
+                    .map(q => responses[q.id])
+                    .filter(r => r !== null && r !== undefined);
+
+                if (likertResponses.length >= 3) {
+                    const uniqueResponses = new Set(likertResponses);
+                    if (uniqueResponses.size === 1) {
+                        patterns.straightLining = true;
+                    }
+                }
+
+                // Additional pattern detection could be added here
+
+                return patterns;
+            }
+        }
+
+        // Initialize global question factory and response validator
+        window.questionFactory = new QuestionFactory();
+        window.responseValidator = new ResponseValidator();
+
+        // Helper function to create a complete survey from question definitions
+        window.createSurvey = function(surveyConfig) {
+            const survey = {
+                id: surveyConfig.id || generateUUID(),
+                title: surveyConfig.title || 'Survey',
+                description: surveyConfig.description || '',
+                questions: [],
+                responses: {},
+
+                addQuestion: function(type, config) {
+                    const question = questionFactory.create(type, config);
+                    this.questions.push(question);
+                    return question;
+                },
+
+                validate: function() {
+                    return responseValidator.validateAll(this.responses, this.questions);
+                },
+
+                getStatistics: function() {
+                    return responseValidator.getStatistics(this.responses, this.questions);
+                },
+
+                submit: function() {
+                    const validation = this.validate();
+                    if (!validation.valid) {
+                        return {
+                            success: false,
+                            errors: validation.errors
+                        };
+                    }
+
+                    const stats = this.getStatistics();
+                    return {
+                        success: true,
+                        surveyId: this.id,
+                        responses: this.responses,
+                        statistics: stats
+                    };
+                }
+            };
+
+            // Add pre-defined questions if provided
+            if (surveyConfig.questions) {
+                surveyConfig.questions.forEach(qDef => {
+                    survey.addQuestion(qDef.type, qDef.config);
+                });
+            }
+
+            return survey;
+        };
+
     </script>
 </body>
 </html>
