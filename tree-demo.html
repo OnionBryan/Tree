@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tree Visualization Engine - Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .demo-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            text-align: center;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: transform 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        #builderContainer {
+            background: #fafafa;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid #e0e0e0;
+        }
+
+        .info-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .info-panel h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .info-panel ul {
+            margin-left: 20px;
+        }
+
+        .info-panel li {
+            margin-bottom: 5px;
+            color: #666;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .feature-card {
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .feature-card h4 {
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+
+        .feature-card p {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <h1>🌳 Tree Visualization Engine</h1>
+        <p class="subtitle">Multi-Branch Tree Rendering with Interactive Features - Version 2.0</p>
+
+        <div class="controls">
+            <button class="btn" onclick="createSampleTree()">Create Sample Tree</button>
+            <button class="btn" onclick="addDecisionNode()">Add Decision Node</button>
+            <button class="btn" onclick="addLogicGate()">Add Logic Gate</button>
+            <button class="btn" onclick="applyHierarchicalLayout()">Hierarchical Layout</button>
+            <button class="btn" onclick="applyRadialLayout()">Radial Layout</button>
+            <button class="btn" onclick="applyForceLayout()">Force Layout</button>
+            <button class="btn btn-secondary" onclick="clearTree()">Clear Tree</button>
+            <button class="btn btn-secondary" onclick="exportTree()">Export JSON</button>
+        </div>
+
+        <div id="builderContainer"></div>
+
+        <div class="info-panel">
+            <h3>✨ Features</h3>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>🎨 Multiple Layouts</h4>
+                    <p>Hierarchical, Radial, and Force-Directed layouts for optimal visualization</p>
+                </div>
+                <div class="feature-card">
+                    <h4>🔧 Logic Gates</h4>
+                    <p>AND, OR, NOT, XOR, MAJORITY gates with visual feedback</p>
+                </div>
+                <div class="feature-card">
+                    <h4>🌫️ Fuzzy Logic</h4>
+                    <p>MIN, MAX, Product, and Average fuzzy operations</p>
+                </div>
+                <div class="feature-card">
+                    <h4>🎯 Multi-Branch</h4>
+                    <p>Support for 2-16 branches with custom labels</p>
+                </div>
+                <div class="feature-card">
+                    <h4>🖱️ Interactive</h4>
+                    <p>Drag nodes, zoom, pan, and click to select</p>
+                </div>
+                <div class="feature-card">
+                    <h4>⌨️ Keyboard Shortcuts</h4>
+                    <p>F: Fit to screen, R: Reset view, Delete: Remove node</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel" style="margin-top: 15px;">
+            <h3>📋 Usage Instructions</h3>
+            <ul>
+                <li><strong>Create Sample Tree:</strong> Generate a demo tree with various node types</li>
+                <li><strong>Add Nodes:</strong> Click buttons to add different node types</li>
+                <li><strong>Move Nodes:</strong> Click and drag nodes to reposition them</li>
+                <li><strong>Zoom:</strong> Use mouse wheel to zoom in/out</li>
+                <li><strong>Pan:</strong> Click and drag on empty space to pan the view</li>
+                <li><strong>Select:</strong> Click on a node to select it (shows info in overlay)</li>
+                <li><strong>Delete:</strong> Select a node and press Delete key</li>
+                <li><strong>Layouts:</strong> Apply different automatic layouts to organize your tree</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Tree Visualization Engine -->
+    <script src="tree-visualization.js"></script>
+    <script>
+        let treeVisualizer;
+
+        // Initialize on DOM load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Initializing Tree Visualization Demo...');
+            treeVisualizer = new TreeVisualization.EnhancedTreeBuilder('builderContainer');
+            console.log('✨ Tree Visualizer initialized');
+        });
+
+        // Create a sample tree with various node types
+        function createSampleTree() {
+            const graph = treeVisualizer.graph;
+
+            // Clear existing nodes
+            graph.nodes.clear();
+            graph.edges.clear();
+
+            // Create root decision node
+            const root = new TreeVisualization.AdvancedNode({
+                name: 'Start',
+                nodeType: 'decision',
+                branchCount: 2,
+                position: { x: 0, y: -200 }
+            });
+            graph.addNode(root);
+
+            // Create logic gate nodes
+            const andGate = new TreeVisualization.AdvancedNode({
+                name: 'AND Gate',
+                nodeType: 'logic_gate',
+                logicType: 'and',
+                branchCount: 2,
+                position: { x: -150, y: -50 }
+            });
+            graph.addNode(andGate);
+
+            const orGate = new TreeVisualization.AdvancedNode({
+                name: 'OR Gate',
+                nodeType: 'logic_gate',
+                logicType: 'or',
+                branchCount: 2,
+                position: { x: 150, y: -50 }
+            });
+            graph.addNode(orGate);
+
+            // Create fuzzy gate
+            const fuzzyGate = new TreeVisualization.AdvancedNode({
+                name: 'Fuzzy MIN',
+                nodeType: 'fuzzy_gate',
+                logicType: 'fuzzy_min',
+                branchCount: 3,
+                position: { x: -150, y: 100 }
+            });
+            graph.addNode(fuzzyGate);
+
+            // Create terminal nodes
+            const terminal1 = new TreeVisualization.AdvancedNode({
+                name: 'Outcome A',
+                nodeType: 'terminal',
+                position: { x: -250, y: 250 }
+            });
+            graph.addNode(terminal1);
+
+            const terminal2 = new TreeVisualization.AdvancedNode({
+                name: 'Outcome B',
+                nodeType: 'terminal',
+                position: { x: 0, y: 250 }
+            });
+            graph.addNode(terminal2);
+
+            const terminal3 = new TreeVisualization.AdvancedNode({
+                name: 'Outcome C',
+                nodeType: 'terminal',
+                position: { x: 250, y: 250 }
+            });
+            graph.addNode(terminal3);
+
+            // Create edges
+            graph.addEdge(root.id, andGate.id, { label: 'False' });
+            graph.addEdge(root.id, orGate.id, { label: 'True' });
+            graph.addEdge(andGate.id, fuzzyGate.id, { label: 'Output' });
+            graph.addEdge(orGate.id, terminal3.id, { label: 'Output' });
+            graph.addEdge(fuzzyGate.id, terminal1.id, { label: 'Low' });
+            graph.addEdge(fuzzyGate.id, terminal2.id, { label: 'High' });
+
+            console.log('Sample tree created with', graph.nodes.size, 'nodes');
+        }
+
+        // Add a decision node
+        function addDecisionNode() {
+            const node = new TreeVisualization.AdvancedNode({
+                name: 'Decision ' + (treeVisualizer.graph.nodes.size + 1),
+                nodeType: 'decision',
+                branchCount: 2,
+                position: {
+                    x: Math.random() * 400 - 200,
+                    y: Math.random() * 400 - 200
+                }
+            });
+            treeVisualizer.graph.addNode(node);
+            console.log('Added decision node:', node.name);
+        }
+
+        // Add a logic gate
+        function addLogicGate() {
+            const types = ['and', 'or', 'xor', 'majority'];
+            const type = types[Math.floor(Math.random() * types.length)];
+
+            const node = new TreeVisualization.AdvancedNode({
+                name: type.toUpperCase(),
+                nodeType: 'logic_gate',
+                logicType: type,
+                branchCount: 2,
+                position: {
+                    x: Math.random() * 400 - 200,
+                    y: Math.random() * 400 - 200
+                }
+            });
+            treeVisualizer.graph.addNode(node);
+            console.log('Added logic gate:', node.name);
+        }
+
+        // Apply hierarchical layout
+        function applyHierarchicalLayout() {
+            TreeVisualization.TreeLayout.hierarchical(treeVisualizer.graph, {
+                levelSeparation: 150,
+                nodeSeparation: 100,
+                direction: 'TB'
+            });
+            console.log('Applied hierarchical layout');
+        }
+
+        // Apply radial layout
+        function applyRadialLayout() {
+            TreeVisualization.TreeLayout.radial(treeVisualizer.graph, {
+                radius: 120,
+                centerX: 0,
+                centerY: 0
+            });
+            console.log('Applied radial layout');
+        }
+
+        // Apply force-directed layout
+        function applyForceLayout() {
+            const positions = TreeVisualization.TreeLayout.forceDirected(treeVisualizer.graph, {
+                iterations: 300,
+                idealLength: 150
+            });
+
+            // Apply positions to nodes
+            for (const [nodeId, pos] of positions) {
+                const node = treeVisualizer.graph.nodes.get(nodeId);
+                if (node) {
+                    node.position = pos;
+                }
+            }
+            console.log('Applied force-directed layout');
+        }
+
+        // Clear the tree
+        function clearTree() {
+            if (confirm('Clear the entire tree?')) {
+                treeVisualizer.graph.nodes.clear();
+                treeVisualizer.graph.edges.clear();
+                console.log('Tree cleared');
+            }
+        }
+
+        // Export tree as JSON
+        function exportTree() {
+            const data = treeVisualizer.graph.toJSON();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `tree_export_${Date.now()}.json`;
+            a.click();
+
+            URL.revokeObjectURL(url);
+            console.log('Tree exported');
+        }
+    </script>
+</body>
+</html>
